@@ -1,0 +1,25 @@
+{
+  "context_servers": {
+    "Context7": {
+      "source": "custom",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "ctx7sk-ef32cd94-02c5-4bf4-8560-7100828db6ff"
+      ]
+    },
+    "Github": {
+      "source": "custom",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.githubcopilot.com/mcp",
+        "--header",
+        "Authorization: Bearer "
+      ]
+    }
+  }
+}

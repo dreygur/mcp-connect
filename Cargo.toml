@@ -1,0 +1,28 @@
+[package]
+name = "mcp-remote"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rmcp = { version = "0.7.0", features = [
+    "client",
+    "transport-sse-client-reqwest",
+    "reqwest",
+    "transport-streamable-http-client-reqwest",
+    "transport-child-process",
+    "tower",
+    "auth"
+] }
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+rand = "0.9"
+futures = "0.3"
+anyhow = "1.0"
+url = "2.4"
+tower = "0.5"
+axum = "0.8"
+reqwest = "0.12"
+clap = { version = "4.0", features = ["derive"] }
