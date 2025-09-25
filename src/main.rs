@@ -1,6 +1,8 @@
 use anyhow::Result;
 use rmcp::{
-    model::{CallToolRequestParam, ClientCapabilities, ClientInfo, Implementation}, transport::{streamable_http_client::StreamableHttpClient, StreamableHttpClientTransport}, ServiceExt
+    ServiceExt,
+    model::{CallToolRequestParam, ClientCapabilities, ClientInfo, Implementation},
+    transport::{StreamableHttpClientTransport, streamable_http_client::StreamableHttpClient},
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -19,16 +21,13 @@ async fn main() -> Result<()> {
     let token = "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";
 
     let transport = StreamableHttpClientTransport::from_uri(url);
-let client_info = ClientInfo {
-        id: "rmcp".to_string(),
-        name: "rmcp".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-        capabilities: ClientCapabilities {
-            call_tool: true,
-            ..Default::default()
-        },
+    let client_info = ClientInfo {
+        ..Default::default()
     };
-let client_info_provider = ClientInfoProvider::new(client_info);
-let client = StreamableHttpClient::new(transport, client_info_provider);
+    let client = client_info.serve(transport).await.inspect_err(|e| {
+        tracing::error!("client error: {:?}", e);
+    })?;
+    let server_info = client.peer_info();
+    tracing::info!("Connected to server: {server_info:#?}");
     Ok(())
 }
