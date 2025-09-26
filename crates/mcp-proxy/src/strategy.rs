@@ -19,7 +19,7 @@ pub enum TransportType {
 
 impl Default for TransportStrategy {
     fn default() -> Self {
-        TransportStrategy::HttpFirst
+        TransportStrategy::SseFirst
     }
 }
 

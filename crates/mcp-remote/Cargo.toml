@@ -18,8 +18,10 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true
 url.workspace = true
+dirs = "5.0"
 
 mcp-proxy = { path = "../mcp-proxy" }
+mcp-oauth = { path = "../mcp-oauth" }
 
 [features]
 default = []

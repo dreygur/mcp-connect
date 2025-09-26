@@ -1,6 +1,9 @@
 use clap::{Parser, ValueEnum};
 use mcp_proxy::{McpProxy, TransportStrategy};
+use mcp_oauth::OAuthClient;
 use tracing::{error, info};
+use std::path::PathBuf;
+use std::fs;
 
 #[derive(Parser)]
 #[command(
@@ -14,7 +17,7 @@ struct Args {
     server_url: String,
 
     /// Transport strategy for connecting to remote server
-    #[arg(long, value_enum, default_value = "http-first")]
+    #[arg(long, value_enum, default_value = "sse-first")]
     transport: TransportStrategyArg,
 
     /// Enable debug logging
@@ -44,6 +47,38 @@ struct Args {
     /// Authentication timeout in seconds
     #[arg(long, default_value = "300")]
     auth_timeout: u64,
+
+    /// Enable OAuth 2.0 authentication
+    #[arg(long)]
+    oauth: bool,
+
+    /// OAuth callback port (0 for auto-select)
+    #[arg(long, default_value = "0")]
+    oauth_port: u16,
+
+    /// Static OAuth client ID
+    #[arg(long)]
+    oauth_client_id: Option<String>,
+
+    /// Static OAuth client secret
+    #[arg(long)]
+    oauth_client_secret: Option<String>,
+
+    /// OAuth scope to request
+    #[arg(long, default_value = "mcp")]
+    oauth_scope: String,
+
+    /// Static OAuth client metadata (JSON string or @filepath)
+    #[arg(long)]
+    static_oauth_client_metadata: Option<String>,
+
+    /// Static OAuth client info (JSON string or @filepath)
+    #[arg(long)]
+    static_oauth_client_info: Option<String>,
+
+    /// Host for OAuth callback URL
+    #[arg(long, default_value = "localhost")]
+    callback_host: String,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -123,10 +158,80 @@ async fn main() -> anyhow::Result<()> {
         info!("Ignoring tools: {:?}", args.ignore_tools);
     }
 
+    // Handle OAuth authentication if enabled
+    let mut headers = args.headers;
+    if args.oauth {
+        info!("OAuth 2.0 authentication enabled");
+
+        // Get authentication directory
+        let auth_dir = get_auth_directory()?;
+
+        // Create OAuth client
+        let mut oauth_client = OAuthClient::new(server_url.clone(), auth_dir)?
+            .with_callback_port(args.oauth_port)
+            .with_callback_host(args.callback_host.clone())
+            .with_auth_timeout(args.auth_timeout)
+            .with_scope(args.oauth_scope);
+
+        // Add static client info if provided
+        if let (Some(client_id), client_secret) = (args.oauth_client_id, args.oauth_client_secret) {
+            oauth_client = oauth_client.with_static_client_info(client_id, client_secret);
+        }
+
+        // Add static OAuth server metadata if provided
+        if let Some(metadata_input) = args.static_oauth_client_metadata {
+            match parse_json_or_file(&metadata_input) {
+                Ok(metadata_json) => {
+                    info!("Using static OAuth client metadata");
+                    let metadata: mcp_oauth::types::OAuthServerMetadata = serde_json::from_value(metadata_json)
+                        .map_err(|e| anyhow::anyhow!("Invalid OAuth server metadata format: {}", e))?;
+                    oauth_client = oauth_client.with_server_metadata(metadata);
+                }
+                Err(e) => {
+                    error!("Failed to parse static OAuth client metadata: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+
+        // Add static OAuth client info if provided (in addition to individual flags)
+        if let Some(client_info_input) = args.static_oauth_client_info {
+            match parse_json_or_file(&client_info_input) {
+                Ok(client_json) => {
+                    info!("Using static OAuth client info");
+                    let client_id = client_json.get("client_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow::anyhow!("Missing client_id in static OAuth client info"))?
+                        .to_string();
+                    let client_secret = client_json.get("client_secret")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    oauth_client = oauth_client.with_static_client_info(client_id, client_secret);
+                }
+                Err(e) => {
+                    error!("Failed to parse static OAuth client info: {}", e);
+                    return Err(e);
+                }
+            }
+        }
+
+        // Get access token and add to headers
+        match oauth_client.get_access_token().await {
+            Ok(access_token) => {
+                info!("Successfully obtained OAuth access token");
+                headers.push(format!("Authorization: Bearer {}", access_token));
+            }
+            Err(e) => {
+                error!("OAuth authentication failed: {}", e);
+                return Err(anyhow::anyhow!("OAuth authentication failed: {}", e));
+            }
+        }
+    }
+
     // Create and start the proxy
     let mut proxy = McpProxy::new(server_url)
         .with_transport_strategy(args.transport.into())
-        .with_headers(args.headers);
+        .with_headers(headers);
 
     // Handle shutdown gracefully
     let result = tokio::select! {
@@ -153,6 +258,22 @@ async fn main() -> anyhow::Result<()> {
     result
 }
 
+/// Parse JSON string or file path (if prefixed with @)
+fn parse_json_or_file(input: &str) -> anyhow::Result<serde_json::Value> {
+    if input.starts_with('@') {
+        // File path - remove @ prefix and read file
+        let file_path = &input[1..];
+        let content = fs::read_to_string(file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read file '{}': {}", file_path, e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| anyhow::anyhow!("Invalid JSON in file '{}': {}", file_path, e))
+    } else {
+        // Direct JSON string
+        serde_json::from_str(input)
+            .map_err(|e| anyhow::anyhow!("Invalid JSON string: {}", e))
+    }
+}
+
 fn validate_server_url(url: &str, allow_http: bool) -> anyhow::Result<String> {
     use url::Url;
 
@@ -174,6 +295,24 @@ fn validate_server_url(url: &str, allow_http: bool) -> anyhow::Result<String> {
             anyhow::bail!("Unsupported URL scheme '{}'. Use http:// or https://", scheme);
         }
     }
+}
+
+/// Get the authentication directory for storing OAuth tokens
+///
+/// Returns ~/.mcp-auth on Unix-like systems or equivalent on other platforms
+fn get_auth_directory() -> anyhow::Result<PathBuf> {
+    let home_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
+
+    let auth_dir = home_dir.join(".mcp-auth");
+
+    // Create directory if it doesn't exist
+    if !auth_dir.exists() {
+        std::fs::create_dir_all(&auth_dir)?;
+        info!("Created authentication directory: {:?}", auth_dir);
+    }
+
+    Ok(auth_dir)
 }
 
 #[cfg(test)]

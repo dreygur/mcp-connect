@@ -3,6 +3,7 @@ members = [
     "crates/mcp-types",
     "crates/mcp-client",
     "crates/mcp-server",
+    "crates/mcp-oauth",
     "crates/mcp-proxy",
     "crates/mcp-remote"
 ]

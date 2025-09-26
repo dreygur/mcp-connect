@@ -13,13 +13,7 @@
     "Github": {
       "source": "custom",
       "command": "npx",
-      "args": [
-        "-y",
-        "mcp-remote",
-        "https://api.githubcopilot.com/mcp",
-        "--header",
-        "Authorization: Bearer "
-      ]
+      "args": ["-y", "mcp-remote", "https://api.githubcopilot.com/mcp"]
     }
   }
 }
