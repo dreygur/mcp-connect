@@ -86,6 +86,7 @@ async fn main() -> anyhow::Result<()> {
         .with_thread_ids(false)
         .with_file(false)
         .with_line_number(false)
+        .with_writer(std::io::stderr) // Send logs to stderr, not stdout
         .init();
 
     // Validate server URL

@@ -396,3 +396,110 @@ This specification provides the foundation for implementing a robust, secure, an
 6. **Phase 6**: Advanced features and optimizations
 
 This TODO list ensures the Rust implementation will eventually match and exceed the feature set of geelen/mcp-remote while maintaining its performance and deployment advantages.
+
+## Testing with @modelcontextprotocol/inspector
+
+### Testing Commands
+
+**Basic Inspector Testing:**
+```bash
+# Test with inspector GUI
+npx @modelcontextprotocol/inspector --config inspector.config.json
+
+# Test with inspector CLI mode
+npx @modelcontextprotocol/inspector --config inspector.config.json --cli
+```
+
+### Test Configuration (inspector.config.json)
+
+The `inspector.config.json` file should be configured to test the mcp-remote implementation:
+
+```json
+{
+  "mcpServers": {
+    "mcp-remote-test": {
+      "command": "cargo",
+      "args": [
+        "run",
+        "--bin",
+        "mcp-remote",
+        "--",
+        "http://localhost:8080/mcp",
+        "--debug",
+        "--allow-http"
+      ],
+      "env": {}
+    }
+  }
+}
+```
+
+### Testing Protocol
+
+1. **Build and Test**: Always build before testing
+   ```bash
+   cargo build --release
+   npx @modelcontextprotocol/inspector --config inspector.config.json --cli
+   ```
+
+2. **Debug Testing**: Use debug mode for detailed logs
+   ```bash
+   npx @modelcontextprotocol/inspector --config inspector.config.json --cli --debug
+   ```
+
+3. **Test Different Transport Strategies**:
+   - HTTP-first: `--transport http-first`
+   - SSE-first: `--transport sse-first`
+   - HTTP-only: `--transport http-only`
+   - SSE-only: `--transport sse-only`
+
+4. **Test Custom Headers**:
+   ```bash
+   cargo run --bin mcp-remote -- http://localhost:8080/mcp --header "Authorization: Bearer token123" --debug
+   ```
+
+5. **Test Tool Filtering**:
+   ```bash
+   cargo run --bin mcp-remote -- http://localhost:8080/mcp --ignore-tool "dangerous_*" --debug
+   ```
+
+### Test Validation Checklist
+
+When testing with inspector, verify:
+- [ ] MCP protocol handshake completes successfully
+- [ ] Tools are properly enumerated and accessible
+- [ ] Resource discovery works correctly
+- [ ] Error handling provides meaningful messages
+- [ ] Debug logs show proper transport negotiation
+- [ ] Custom headers are properly transmitted
+- [ ] Tool filtering works as expected
+- [ ] Connection cleanup happens on termination
+
+### Automated Testing Integration
+
+For CI/CD, use inspector CLI mode:
+```bash
+# In test scripts
+cargo build --release
+npx @modelcontextprotocol/inspector --config inspector.config.json --cli --test-mode --timeout 30
+```
+
+### Mock Server Testing
+
+Create test configurations for different server scenarios:
+```json
+{
+  "mcpServers": {
+    "mock-oauth-server": {
+      "command": "cargo",
+      "args": ["run", "--bin", "mcp-remote", "--", "http://localhost:9090/oauth-mcp"],
+      "env": {"MCP_TEST_MODE": "oauth"}
+    },
+    "mock-header-auth": {
+      "command": "cargo",
+      "args": ["run", "--bin", "mcp-remote", "--", "http://localhost:9091/header-mcp", "--header", "X-API-Key: test123"],
+      "env": {"MCP_TEST_MODE": "header-auth"}
+    }
+  }
+}
+```
