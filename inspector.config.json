@@ -2,7 +2,12 @@
   "mcpServers": {
     "github": {
       "command": "./target/release/mcp-remote",
-      "args": ["https://api.githubcopilot.com/mcp", "--debug"],
+      "args": [
+        "https://api.githubcopilot.com/mcp",
+        "--header",
+        "'Authorization: Bearer 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'",
+        "--debug"
+      ],
       "env": {}
     },
     "context7": {
