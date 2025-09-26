@@ -1,10 +1,10 @@
 [workspace]
 members = [
-    "mcp-types",
-    "mcp-client",
-    "mcp-server",
-    "mcp-proxy",
-    "mcp-remote"
+    "crates/mcp-types",
+    "crates/mcp-client",
+    "crates/mcp-server",
+    "crates/mcp-proxy",
+    "crates/mcp-remote"
 ]
 resolver = "2"
 

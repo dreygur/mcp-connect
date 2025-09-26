@@ -1,0 +1,25 @@
+[package]
+name = "mcp-remote"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mcp-remote"
+path = "src/main.rs"
+
+[dependencies]
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+clap.workspace = true
+url.workspace = true
+
+mcp-proxy = { path = "../mcp-proxy" }
+
+[features]
+default = []
