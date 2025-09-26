@@ -132,14 +132,45 @@ impl McpProxy {
 
             match request.method.as_str() {
                 "initialize" => {
-                    // Handle initialize locally - proxy acts as the server
-                    let response = self.handle_initialize_request(request).await?;
+                    // Handle initialize locally AND forward to remote server for session setup
+                    let response = self.handle_initialize_request(request.clone()).await?;
                     stdio_transport.send(serde_json::to_value(&response)?).await?;
+
+                    // Also forward initialize to remote server to establish session
+                    // but don't send response back (we already sent our local response)
+                    if let Err(e) = remote_client.send_request(&request.method, request.params).await {
+                        warn!("Failed to forward initialize to remote server: {}", e);
+                    }
                 }
                 "ping" => {
                     // Handle ping locally - simple pong response
                     let response = self.handle_ping_request(request).await?;
                     stdio_transport.send(serde_json::to_value(&response)?).await?;
+                }
+                "tools/list" => {
+                    // Always forward tools/list to remote server
+                    debug!("Forwarding tools/list request to remote server");
+                    match remote_client.send_request(&request.method, request.params).await {
+                        Ok(response) => {
+                            debug!("Received response from remote server for tools/list");
+                            stdio_transport.send(serde_json::to_value(&response)?).await?;
+                        }
+                        Err(e) => {
+                            error!("Failed to get tools/list from remote server: {}", e);
+                            // Send error response
+                            let error_response = JsonRpcResponse {
+                                jsonrpc: "2.0".to_string(),
+                                id: request.id,
+                                result: None,
+                                error: Some(mcp_types::JsonRpcError {
+                                    code: -32603,
+                                    message: format!("Remote server error: {}", e),
+                                    data: None,
+                                }),
+                            };
+                            stdio_transport.send(serde_json::to_value(&error_response)?).await?;
+                        }
+                    }
                 }
                 _ => {
                     // Forward other requests to remote server
@@ -156,8 +187,9 @@ impl McpProxy {
 
             match notification.method.as_str() {
                 "notifications/initialized" => {
-                    // Handle locally
+                    // Handle locally AND forward to remote server
                     info!("Client initialized");
+                    remote_client.send_notification(&notification.method, notification.params).await?;
                 }
                 _ => {
                     // Forward to remote server
