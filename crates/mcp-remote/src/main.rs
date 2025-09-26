@@ -113,7 +113,8 @@ async fn main() -> anyhow::Result<()> {
 
     // Create and start the proxy
     let mut proxy = McpProxy::new(server_url)
-        .with_transport_strategy(args.transport.into());
+        .with_transport_strategy(args.transport.into())
+        .with_headers(args.headers);
 
     // Handle shutdown gracefully
     let result = tokio::select! {

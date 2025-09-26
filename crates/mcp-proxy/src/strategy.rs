@@ -26,11 +26,12 @@ impl Default for TransportStrategy {
 pub async fn create_remote_transport(
     server_url: &str,
     strategy: TransportStrategy,
+    headers: &[String],
 ) -> Result<(Box<dyn Transport>, TransportType)> {
     match strategy {
         TransportStrategy::HttpFirst => {
             // Try HTTP first
-            match HttpTransport::new(server_url) {
+            match HttpTransport::new(server_url).and_then(|t| t.with_headers(headers)) {
                 Ok(mut transport) => {
                     if transport.connect().await.is_ok() {
                         return Ok((Box::new(transport), TransportType::Http));
@@ -63,7 +64,7 @@ pub async fn create_remote_transport(
             }
 
             // Fallback to HTTP
-            match HttpTransport::new(server_url) {
+            match HttpTransport::new(server_url).and_then(|t| t.with_headers(headers)) {
                 Ok(mut transport) => {
                     transport.connect().await?;
                     Ok((Box::new(transport), TransportType::Http))
@@ -75,7 +76,7 @@ pub async fn create_remote_transport(
             }
         }
         TransportStrategy::HttpOnly => {
-            let mut transport = HttpTransport::new(server_url)?;
+            let mut transport = HttpTransport::new(server_url)?.with_headers(headers)?;
             transport.connect().await?;
             Ok((Box::new(transport), TransportType::Http))
         }

@@ -11,6 +11,7 @@ pub struct McpProxy {
     local_server: Option<McpServer>,
     server_url: String,
     transport_strategy: TransportStrategy,
+    headers: Vec<String>,
     connected_transport_type: Option<TransportType>,
     message_queue: Arc<Mutex<Vec<serde_json::Value>>>,
     running: bool,
@@ -23,6 +24,7 @@ impl McpProxy {
             local_server: None,
             server_url,
             transport_strategy: TransportStrategy::default(),
+            headers: Vec::new(),
             connected_transport_type: None,
             message_queue: Arc::new(Mutex::new(Vec::new())),
             running: false,
@@ -31,6 +33,11 @@ impl McpProxy {
 
     pub fn with_transport_strategy(mut self, strategy: TransportStrategy) -> Self {
         self.transport_strategy = strategy;
+        self
+    }
+
+    pub fn with_headers(mut self, headers: Vec<String>) -> Self {
+        self.headers = headers;
         self
     }
 
@@ -54,7 +61,7 @@ impl McpProxy {
         info!("Connecting to remote MCP server: {}", self.server_url);
 
         let (transport, transport_type) =
-            create_remote_transport(&self.server_url, self.transport_strategy.clone()).await?;
+            create_remote_transport(&self.server_url, self.transport_strategy.clone(), &self.headers).await?;
 
         info!("Connected using transport: {:?}", transport_type);
         self.connected_transport_type = Some(transport_type);
@@ -68,8 +75,10 @@ impl McpProxy {
         );
 
         // Get available tools from remote server
-        let tools = client.list_tools().await.unwrap_or_default();
-        info!("Remote server provides {} tools", tools.len());
+        // TODO: Implement proper session management for GitHub MCP server
+        // let tools = client.list_tools().await.unwrap_or_default();
+        // info!("Remote server provides {} tools", tools.len());
+        info!("Skipping tool listing for now due to session management");
 
         self.remote_client = Some(client);
         Ok(())
@@ -83,11 +92,12 @@ impl McpProxy {
             .with_transport(transport);
 
         // Get tools from remote client and add them to local server
-        if let Some(ref mut client) = self.remote_client {
-            let tools = client.list_tools().await.unwrap_or_default();
-            // Tools are now shared types, so no conversion needed
-            server = server.with_tools(tools);
-        }
+        // TODO: Implement proper session management for GitHub MCP server
+        // if let Some(ref mut client) = self.remote_client {
+        //     let tools = client.list_tools().await.unwrap_or_default();
+        //     // Tools are now shared types, so no conversion needed
+        //     server = server.with_tools(tools);
+        // }
 
         // For now, we'll add a simple handler that returns an error
         // In a full implementation, we'd need a proper async handler system

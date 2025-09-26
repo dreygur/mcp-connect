@@ -2,7 +2,7 @@ use crate::error::{ClientError, Result};
 use crate::transport::Transport;
 use crate::types::JsonRpcMessage;
 use async_trait::async_trait;
-use reqwest::Client;
+use reqwest::{Client, header::HeaderMap};
 use std::time::Duration;
 use tokio::sync::mpsc;
 use url::Url;
@@ -10,6 +10,7 @@ use url::Url;
 pub struct HttpTransport {
     client: Client,
     endpoint: Url,
+    headers: HeaderMap,
     response_receiver: Option<mpsc::UnboundedReceiver<JsonRpcMessage>>,
     connected: bool,
 }
@@ -26,28 +27,36 @@ impl HttpTransport {
         Ok(Self {
             client,
             endpoint,
+            headers: HeaderMap::new(),
             response_receiver: None,
             connected: false,
         })
     }
 
-    pub async fn connect(&mut self) -> Result<()> {
-        // Test connection with a simple request
-        let response = self.client
-            .get(self.endpoint.clone())
-            .header("Accept", "application/json")
-            .send()
-            .await?;
+    pub fn with_headers(mut self, headers: &[String]) -> Result<Self> {
+        for header_str in headers {
+            if let Some((key, value)) = header_str.split_once(':') {
+                let key = key.trim();
+                let value = value.trim();
 
-        if response.status().is_success() {
-            self.connected = true;
-            Ok(())
-        } else {
-            Err(ClientError::Transport(format!(
-                "Connection failed: {}",
-                response.status()
-            )))
+                let header_name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
+                    .map_err(|e| ClientError::Transport(format!("Invalid header name '{}': {}", key, e)))?;
+                let header_value = reqwest::header::HeaderValue::from_str(value)
+                    .map_err(|e| ClientError::Transport(format!("Invalid header value '{}': {}", value, e)))?;
+
+                self.headers.insert(header_name, header_value);
+            } else {
+                return Err(ClientError::Transport(format!("Invalid header format '{}'. Expected 'key:value'", header_str)));
+            }
         }
+        Ok(self)
+    }
+
+    pub async fn connect(&mut self) -> Result<()> {
+        // For GitHub Copilot MCP server, we can't use GET requests
+        // Just mark as connected and rely on first POST request to validate
+        self.connected = true;
+        Ok(())
     }
 }
 
@@ -60,6 +69,7 @@ impl Transport for HttpTransport {
 
         let response = self.client
             .post(self.endpoint.clone())
+            .headers(self.headers.clone())
             .header("Content-Type", "application/json")
             .header("Accept", "application/json, text/event-stream")
             .json(&message)

@@ -66,6 +66,8 @@ pub struct ServerCapabilities {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub logging: Option<LoggingCapability>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion: Option<CompletionCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub prompts: Option<PromptsCapability>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resources: Option<ResourcesCapability>,
@@ -86,9 +88,13 @@ pub struct SamplingCapability {}
 pub struct LoggingCapability {}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompletionCapability {}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptsCapability {
     #[serde(rename = "listChanged")]
-    pub list_changed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_changed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

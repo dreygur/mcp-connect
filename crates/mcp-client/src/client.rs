@@ -46,7 +46,8 @@ impl McpClient {
         self.server_capabilities = Some(init_response.capabilities.clone());
 
         // Send initialized notification
-        self.send_notification("notifications/initialized", None).await?;
+        // TODO: GitHub MCP server might not expect this notification
+        // self.send_notification("initialized", None).await?;
 
         Ok(init_response)
     }
