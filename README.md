@@ -79,6 +79,12 @@ cargo test
 cargo run --bin mcp-remote -- https://example.com/mcp
 ```
 
+## Inspect this proxy server
+
+```bash
+npx @modelcontextprotocol/inspector --config inspector.config.json
+```
+
 ## Project Status
 
 ✅ **Core Implementation Complete**
