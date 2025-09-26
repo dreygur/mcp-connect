@@ -285,3 +285,114 @@ mcp-remote-rs/
 - Secure storage for sensitive data
 
 This specification provides the foundation for implementing a robust, secure, and user-friendly Rust version of the mcp-remote project while maintaining compatibility with the existing ecosystem and improving upon the original implementation where possible.
+
+## Feature Comparison with geelen/mcp-remote - TODO Implementation List
+
+### ✅ Already Implemented (Current Status)
+- [x] STDIO Transport for local client communication
+- [x] HTTP Transport with POST support for remote servers
+- [x] SSE Transport for remote server communication
+- [x] Transport Strategy System (http-first, sse-first, http-only, sse-only)
+- [x] Custom Headers support (`--header` flag)
+- [x] Debug Logging (`--debug` flag)
+- [x] HTTP/HTTPS Control (`--allow-http` flag)
+- [x] Host Specification (`--host` flag)
+- [x] Proxy Support (`--enable-proxy` flag)
+- [x] Tool Filtering (`--ignore-tool` with wildcards)
+- [x] Auth Timeout (`--auth-timeout` flag)
+- [x] Transport Strategy Selection (`--transport` flag)
+- [x] Basic MCP protocol types and serialization
+- [x] Single binary distribution advantage
+- [x] Cross-platform support
+
+### 🚧 High Priority TODO Items (Missing OAuth Features)
+- [ ] **OAuth 2.0 Client Implementation**
+  - [ ] Dynamic Client Registration (RFC 7591)
+  - [ ] Authorization Code Flow with PKCE
+  - [ ] Browser launching for auth flow
+  - [ ] Local callback server for auth codes
+  - [ ] Token exchange implementation
+
+- [ ] **Token Management System**
+  - [ ] Automatic token refresh logic
+  - [ ] Persistent token storage in `~/.mcp-auth` directory
+  - [ ] Secure token storage using platform keyring
+  - [ ] Token validation and expiry handling
+
+- [ ] **Multi-instance Coordination**
+  - [ ] Lock file mechanism for preventing conflicts
+  - [ ] Shared token storage between instances
+  - [ ] Instance coordination for auth flows
+  - [ ] Proper cleanup on process termination
+
+- [ ] **Static OAuth Configuration**
+  - [ ] `--static-oauth-client-metadata` flag support
+  - [ ] `--static-oauth-client-info` flag support
+  - [ ] JSON and file-based configuration loading
+  - [ ] Environment variable substitution in configs
+
+### 🔧 Medium Priority TODO Items (Enhanced Features)
+- [ ] **Advanced Certificate Handling**
+  - [ ] Custom CA certificate support via environment variables
+  - [ ] VPN certificate handling improvements
+  - [ ] SSL/TLS configuration options
+
+- [ ] **Enhanced Error Handling & Recovery**
+  - [ ] Comprehensive error context and user-friendly messages
+  - [ ] Automatic retry mechanisms for transient failures
+  - [ ] Graceful degradation for partial failures
+  - [ ] Better error reporting for OAuth failures
+
+- [ ] **Lazy Authentication**
+  - [ ] Only authenticate when first request requires it
+  - [ ] Deferred auth initialization
+  - [ ] Auth state caching and reuse
+
+- [ ] **Advanced Logging & Debugging**
+  - [ ] Structured logging with timestamps
+  - [ ] Debug log files in `~/.mcp-auth/{server_hash}_debug.log`
+  - [ ] Detailed OAuth flow logging
+  - [ ] Connection state and health logging
+
+### 🎯 Low Priority TODO Items (Nice-to-Have)
+- [ ] **Enhanced CLI Experience**
+  - [ ] Configuration file support
+  - [ ] Interactive configuration wizard
+  - [ ] Health check commands
+  - [ ] Token status and refresh commands
+
+- [ ] **Performance Optimizations**
+  - [ ] Connection pooling for HTTP requests
+  - [ ] Async message batching
+  - [ ] Memory usage optimizations
+  - [ ] Startup time improvements
+
+- [ ] **Testing & Quality**
+  - [ ] Comprehensive unit test suite
+  - [ ] Integration tests with mock OAuth servers
+  - [ ] Performance benchmarking
+  - [ ] Security audit and penetration testing
+
+### 📋 Current Competitive Analysis Summary
+
+**Rust Implementation Advantages (Maintain These):**
+- ⚡ Performance: Much faster startup and lower memory usage
+- 🔹 Single Binary: No Node.js dependency required
+- 🛡️ Type Safety: Rust's compile-time guarantees
+- 🎯 Simplicity: Works great for header-based auth (GitHub Copilot case)
+
+**Missing Features vs geelen/mcp-remote:**
+- ❌ Full OAuth 2.0 implementation (HIGH PRIORITY)
+- ❌ Browser-based authentication flows (HIGH PRIORITY)
+- ❌ Token persistence and refresh (HIGH PRIORITY)
+- ❌ Multi-instance coordination (MEDIUM PRIORITY)
+
+### 🎯 Implementation Priority Order
+1. **Phase 1**: OAuth 2.0 core implementation (dynamic registration, PKCE, token exchange)
+2. **Phase 2**: Token management and persistence system
+3. **Phase 3**: Browser auth flow and callback server
+4. **Phase 4**: Multi-instance coordination and lock files
+5. **Phase 5**: Enhanced error handling and recovery
+6. **Phase 6**: Advanced features and optimizations
+
+This TODO list ensures the Rust implementation will eventually match and exceed the feature set of geelen/mcp-remote while maintaining its performance and deployment advantages.
