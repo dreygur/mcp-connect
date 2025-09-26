@@ -14,6 +14,11 @@
       "command": "npx",
       "args": ["-y", "mcp-remote", "https://mcp.context7.com/mcp"],
       "env": {}
+    },
+    "cc": {
+      "command": "./target/release/mcp-remote",
+      "args": ["https://mcp.context7.com/mcp"],
+      "env": {}
     }
   }
 }

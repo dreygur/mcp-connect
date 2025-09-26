@@ -6,19 +6,26 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+# Official rmcp SDK with client features
+rmcp.workspace = true
+
+# Additional dependencies not provided by rmcp
 anyhow.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-uuid.workspace = true
 reqwest.workspace = true
-futures.workspace = true
 url.workspace = true
+futures.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 eventsource-stream = "0.2"
 
+# Internal dependencies
 mcp-types = { path = "../mcp-types" }
+
+[dev-dependencies]
+tokio-test = "0.4"
 
 [features]
 default = ["http", "sse"]

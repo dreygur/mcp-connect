@@ -21,7 +21,7 @@ impl SseTransport {
             .map_err(|e| ClientError::Transport(format!("Invalid URL: {}", e)))?;
 
         let client = Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(Duration::from_secs(300))
             .build()?;
 
         Ok(Self {

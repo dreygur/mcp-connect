@@ -1,9 +1,25 @@
-//! Shared MCP types between client and server
+//! MCP Types - Official rmcp SDK integration
+//!
+//! This crate provides MCP protocol types by re-exporting the official rmcp SDK types
+//! while maintaining backward compatibility with the existing codebase.
 
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+// Re-export core rmcp types
+pub use rmcp::model::*;
+pub use rmcp::{ErrorData, RmcpError};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Additional convenience re-exports
+pub use rmcp::service::{Service, ServiceExt, ServiceError};
+pub use rmcp::{ClientHandler, ServerHandler};
+
+// Common serde re-exports
+pub use rmcp::serde_json;
+
+// Backward compatibility type aliases
+pub type JsonRpcMessage = serde_json::Value;
+pub type McpError = rmcp::ErrorData;
+
+// Legacy JSON-RPC types for backward compatibility
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JsonRpcRequest {
     pub jsonrpc: String,
     pub id: serde_json::Value,
@@ -11,7 +27,7 @@ pub struct JsonRpcRequest {
     pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JsonRpcResponse {
     pub jsonrpc: String,
     pub id: serde_json::Value,
@@ -21,135 +37,122 @@ pub struct JsonRpcResponse {
     pub error: Option<JsonRpcError>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JsonRpcNotification {
     pub jsonrpc: String,
     pub method: String,
     pub params: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct JsonRpcError {
     pub code: i32,
     pub message: String,
     pub data: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InitializeRequest {
-    #[serde(rename = "protocolVersion")]
-    pub protocol_version: String,
-    pub capabilities: ClientCapabilities,
-    #[serde(rename = "clientInfo")]
-    pub client_info: ClientInfo,
+// Utility functions using rmcp methods
+pub fn text_content(text: impl Into<String>) -> Content {
+    Content::text(text)
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct InitializeResponse {
-    #[serde(rename = "protocolVersion")]
-    pub protocol_version: String,
-    pub capabilities: ServerCapabilities,
-    #[serde(rename = "serverInfo")]
-    pub server_info: ServerInfo,
+pub fn success_result(content: Vec<Content>) -> CallToolResult {
+    CallToolResult {
+        content,
+        is_error: Some(false),
+        meta: None,
+        structured_content: None,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ClientCapabilities {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub roots: Option<RootsCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sampling: Option<SamplingCapability>,
+pub fn error_result(message: impl Into<String>) -> CallToolResult {
+    CallToolResult {
+        content: vec![text_content(message.into())],
+        is_error: Some(true),
+        meta: None,
+        structured_content: None,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct ServerCapabilities {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logging: Option<LoggingCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub completion: Option<CompletionCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub prompts: Option<PromptsCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resources: Option<ResourcesCapability>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tools: Option<ToolsCapability>,
+// Error handling utilities
+pub mod error {
+    pub use rmcp::ErrorData;
+    pub use rmcp::RmcpError;
+
+    /// Common error codes
+    pub mod codes {
+        pub const PARSE_ERROR: i32 = -32700;
+        pub const INVALID_REQUEST: i32 = -32600;
+        pub const METHOD_NOT_FOUND: i32 = -32601;
+        pub const INVALID_PARAMS: i32 = -32602;
+        pub const INTERNAL_ERROR: i32 = -32603;
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RootsCapability {
-    #[serde(rename = "listChanged")]
-    pub list_changed: bool,
+// Convert from legacy CallToolRequest to rmcp CallToolRequestParam
+impl From<CallToolRequestParam> for CallToolRequest {
+    fn from(rmcp_param: CallToolRequestParam) -> Self {
+        CallToolRequest {
+            name: rmcp_param.name.to_string(),
+            arguments: rmcp_param.arguments,
+        }
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SamplingCapability {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LoggingCapability {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompletionCapability {}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PromptsCapability {
-    #[serde(rename = "listChanged")]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub list_changed: Option<bool>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResourcesCapability {
-    pub subscribe: bool,
-    #[serde(rename = "listChanged")]
-    pub list_changed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ToolsCapability {
-    #[serde(rename = "listChanged")]
-    pub list_changed: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClientInfo {
-    pub name: String,
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ServerInfo {
-    pub name: String,
-    pub version: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tool {
-    pub name: String,
-    pub description: Option<String>,
-    #[serde(rename = "inputSchema")]
-    pub input_schema: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Backward compatibility CallToolRequest
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallToolRequest {
     pub name: String,
-    pub arguments: Option<HashMap<String, serde_json::Value>>,
+    pub arguments: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Backward compatibility CallToolResponse
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CallToolResponse {
     pub content: Vec<Content>,
     #[serde(rename = "isError")]
     pub is_error: Option<bool>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
-pub enum Content {
-    #[serde(rename = "text")]
-    Text { text: String },
-    #[serde(rename = "image")]
-    Image { data: String, mime_type: String },
+impl From<CallToolResult> for CallToolResponse {
+    fn from(result: CallToolResult) -> Self {
+        CallToolResponse {
+            content: result.content,
+            is_error: result.is_error,
+        }
+    }
 }
 
-pub type JsonRpcMessage = serde_json::Value;
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_content_creation() {
+        let content = text_content("Hello, world!");
+        // Content was created successfully
+        match content {
+            Content::Text(_) => {
+                // Success - it's a text content
+            }
+            _ => panic!("Expected text content"),
+        }
+    }
+
+    #[test]
+    fn test_result_creation() {
+        let result = success_result(vec![text_content("Success")]);
+        assert_eq!(result.is_error, Some(false));
+        assert_eq!(result.content.len(), 1);
+
+        let error = error_result("Failed");
+        assert_eq!(error.is_error, Some(true));
+    }
+
+    #[test]
+    fn test_type_conversions() {
+        let rmcp_result = success_result(vec![text_content("Success")]);
+        let legacy_response: CallToolResponse = rmcp_result.into();
+        assert_eq!(legacy_response.is_error, Some(false));
+    }
+}

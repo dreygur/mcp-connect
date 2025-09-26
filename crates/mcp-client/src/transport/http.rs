@@ -3,6 +3,7 @@ use crate::transport::Transport;
 use crate::types::JsonRpcMessage;
 use async_trait::async_trait;
 use reqwest::{Client, header::HeaderMap};
+use tracing::info;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use url::Url;
