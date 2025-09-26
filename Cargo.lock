@@ -736,17 +736,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "eventsource-stream"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74fef4569247a5f429d9156b9d0a2599914385dd189c539334c625d8099d90ab"
-dependencies = [
- "futures-core",
- "nom",
- "pin-project-lite",
-]
-
-[[package]]
 name = "fastrand"
 version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1553,7 +1542,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "eventsource-stream",
  "futures",
  "mcp-types",
  "reqwest 0.11.27",
@@ -1595,16 +1583,12 @@ name = "mcp-proxy"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "async-trait",
  "futures",
- "mcp-client",
- "mcp-server",
  "mcp-types",
- "serde",
+ "rmcp",
  "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1630,13 +1614,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "futures",
  "mcp-types",
+ "rmcp",
  "serde",
  "serde_json",
  "tokio",
  "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -1687,12 +1670,6 @@ dependencies = [
  "mime",
  "unicase",
 ]
-
-[[package]]
-name = "minimal-lexical"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 
 [[package]]
 name = "miniz_oxide"
@@ -1771,16 +1748,6 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
-]
-
-[[package]]
-name = "nom"
-version = "7.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
-dependencies = [
- "memchr",
- "minimal-lexical",
 ]
 
 [[package]]

@@ -130,18 +130,50 @@ impl CoordinationManager {
     }
 
     /// Wait for authentication to complete on another instance
-    pub async fn wait_for_authentication(&self, _port: u16) -> Result<bool> {
-        // For Phase 1, we'll implement a basic version that just waits a bit
-        // and then checks for tokens on disk
-        // TODO: Implement proper polling mechanism like geelen's implementation
+    pub async fn wait_for_authentication(&self, port: u16) -> Result<bool> {
+        const POLL_INTERVAL_SECS: u64 = 2;
+        const MAX_WAIT_SECS: u64 = 300; // 5 minutes
+        const MAX_POLLS: u64 = MAX_WAIT_SECS / POLL_INTERVAL_SECS;
 
-        warn!("Multi-instance coordination not yet fully implemented");
-        warn!("Waiting 5 seconds then checking for tokens on disk");
+        info!("Waiting for authentication to complete on port {}", port);
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        for poll_count in 0..MAX_POLLS {
+            tokio::time::sleep(tokio::time::Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
-        // Return false to indicate we should handle auth ourselves for now
+            // Check if the lock file still exists and is valid
+            match self.check_lockfile().await? {
+                Some(lock_data) if lock_data.port == port => {
+                    // Lock still exists, continue waiting
+                    debug!("Poll {}/{}: Authentication still in progress", poll_count + 1, MAX_POLLS);
+                    continue;
+                }
+                Some(_) => {
+                    // Lock exists but for different port, something's wrong
+                    warn!("Lock file exists but for different port, giving up coordination");
+                    return Ok(false);
+                }
+                None => {
+                    // Lock file gone, authentication should be complete
+                    info!("Lock file disappeared, authentication may be complete");
+                    return Ok(true);
+                }
+            }
+        }
+
+        warn!("Timed out waiting for authentication to complete, proceeding with own auth");
         Ok(false)
+    }
+
+    /// Wait for authentication and clean up on completion or timeout
+    pub async fn wait_and_cleanup(&self, port: u16) -> Result<bool> {
+        let result = self.wait_for_authentication(port).await;
+
+        // Always try to clean up our lock file
+        if let Err(e) = self.delete_lockfile().await {
+            warn!("Failed to clean up lock file: {}", e);
+        }
+
+        result
     }
 }
 

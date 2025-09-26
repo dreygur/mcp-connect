@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use mcp_proxy::{McpProxy, TransportStrategy};
+use mcp_proxy::{StdioProxy, TransportStrategy};
 use mcp_oauth::OAuthClient;
 use tracing::{error, info};
 use std::path::PathBuf;
@@ -229,7 +229,7 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Create and start the proxy
-    let mut proxy = McpProxy::new(server_url)
+    let proxy = StdioProxy::new(server_url)
         .with_transport_strategy(args.transport.into())
         .with_headers(headers);
 
@@ -249,7 +249,8 @@ async fn main() -> anyhow::Result<()> {
         }
         _ = tokio::signal::ctrl_c() => {
             info!("Received interrupt signal, shutting down gracefully");
-            proxy.stop().await.map_err(|e| anyhow::anyhow!("Shutdown error: {}", e))?;
+            // Since the proxy doesn't have a stop method and runs indefinitely,
+            // we'll just exit gracefully when Ctrl+C is received
             Ok(())
         }
     };

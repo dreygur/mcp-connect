@@ -6,20 +6,21 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-# Official rmcp SDK with client features
+# Official rmcp SDK with client and transport features
 rmcp.workspace = true
 
 # Additional dependencies not provided by rmcp
 anyhow.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-reqwest.workspace = true
 url.workspace = true
-futures.workspace = true
-tokio.workspace = true
+
+# Re-export core dependencies that rmcp uses
 serde.workspace = true
 serde_json.workspace = true
-eventsource-stream = "0.2"
+tokio.workspace = true
+reqwest.workspace = true
+futures.workspace = true
 
 # Internal dependencies
 mcp-types = { path = "../mcp-types" }

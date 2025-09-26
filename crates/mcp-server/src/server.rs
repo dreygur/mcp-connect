@@ -1,238 +1,374 @@
-use crate::error::{ServerError, Result};
-use crate::transport::Transport;
-use crate::types::*;
+//! MCP Server implementation using the official rmcp SDK
+
+use crate::error::ServerError;
+use mcp_types::{Tool, Content};
+use rmcp::{
+    handler::server::ServerHandler,
+    model::{
+        CallToolRequestParam, CallToolResult, InitializeRequestParam, InitializeResult,
+        ListToolsResult, PaginatedRequestParam, CancelledNotificationParam,
+        ProgressNotificationParam, ProtocolVersion,
+    },
+    service::{serve_server, RequestContext, NotificationContext, RoleServer},
+    transport::stdio,
+    ErrorData as McpError,
+};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use tracing::{debug, info};
 
-pub type RequestHandler = Arc<dyn Fn(JsonRpcRequest) -> Result<JsonRpcResponse> + Send + Sync>;
+/// Tool execution handler function type
+pub type ToolHandler = Arc<dyn Fn(CallToolRequestParam) -> std::result::Result<CallToolResult, ServerError> + Send + Sync>;
 
+/// Server information structure
+#[derive(Clone)]
+pub struct ServerInfoData {
+    pub name: String,
+    pub version: String,
+    pub title: Option<String>,
+    pub icons: Option<Vec<rmcp::model::Icon>>,
+    pub website_url: Option<String>,
+}
+
+/// MCP Server using rmcp SDK
+#[derive(Clone)]
 pub struct McpServer {
-    transport: Option<Box<dyn Transport>>,
-    server_info: ServerInfo,
-    capabilities: ServerCapabilities,
-    request_handlers: std::collections::HashMap<String, RequestHandler>,
-    tools: Vec<Tool>,
+    server_info: ServerInfoData,
+    tools: Arc<Mutex<Vec<Tool>>>,
+    tool_handlers: Arc<Mutex<HashMap<String, ToolHandler>>>,
 }
 
 impl McpServer {
-    pub fn new(name: String, version: String) -> Self {
-        let mut server = Self {
-            transport: None,
-            server_info: ServerInfo { name, version },
-            capabilities: ServerCapabilities::default(),
-            request_handlers: std::collections::HashMap::new(),
-            tools: Vec::new(),
-        };
-
-        // Register default handlers
-        server.register_default_handlers();
-        server
+    /// Create a new MCP server with basic information
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            server_info: ServerInfoData {
+                name: name.into(),
+                version: version.into(),
+                title: None,
+                icons: None,
+                website_url: None,
+            },
+            tools: Arc::new(Mutex::new(Vec::new())),
+            tool_handlers: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    pub fn with_transport(mut self, transport: Box<dyn Transport>) -> Self {
-        self.transport = Some(transport);
+    /// Set optional title for the server
+    pub fn with_title(mut self, title: impl Into<String>) -> Self {
+        self.server_info.title = Some(title.into());
         self
     }
 
-    pub fn with_tools(mut self, tools: Vec<Tool>) -> Self {
-        self.tools = tools;
-        self.capabilities.tools = Some(ToolsCapability {
-            list_changed: false,
-        });
-        self
+    /// Add a tool to the server
+    pub async fn add_tool(&self, tool: Tool, handler: ToolHandler) {
+        let mut tools = self.tools.lock().await;
+        let mut handlers = self.tool_handlers.lock().await;
+
+        handlers.insert(tool.name.to_string(), handler);
+        tools.push(tool);
     }
 
-    pub fn add_request_handler<F>(&mut self, method: &str, handler: F)
-    where
-        F: Fn(JsonRpcRequest) -> Result<JsonRpcResponse> + Send + Sync + 'static,
-    {
-        self.request_handlers.insert(method.to_string(), Arc::new(handler));
-    }
-
-    pub async fn run(&mut self) -> Result<()> {
-        loop {
-            let is_connected = {
-                let transport = self.transport.as_ref()
-                    .ok_or_else(|| ServerError::Transport("No transport configured".into()))?;
-                transport.is_connected()
-            };
-
-            if !is_connected {
-                break;
-            }
-
-            let message = {
-                let transport = self.transport.as_mut()
-                    .ok_or_else(|| ServerError::Transport("No transport configured".into()))?;
-                transport.receive().await
-            };
-
-            match message {
-                Ok(message) => {
-                    if let Err(e) = self.handle_message(message).await {
-                        tracing::error!("Error handling message: {}", e);
-                    }
-                }
-                Err(ServerError::ConnectionClosed) => {
-                    tracing::info!("Connection closed");
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!("Transport error: {}", e);
-                    break;
-                }
-            }
+    /// Create a success result for tool execution
+    pub fn success_result(content: Vec<Content>) -> CallToolResult {
+        CallToolResult {
+            content,
+            is_error: Some(false),
+            meta: None,
+            structured_content: None,
         }
+    }
 
+    /// Create an error result for tool execution
+    pub fn error_result(message: impl Into<String>) -> CallToolResult {
+        CallToolResult {
+            content: vec![Content::text(message.into())],
+            is_error: Some(true),
+            meta: None,
+            structured_content: None,
+        }
+    }
+
+    /// Run the server with STDIO transport
+    pub async fn run(self) -> std::result::Result<(), ServerError> {
+        info!("Starting MCP server");
+
+        // Create server service using rmcp
+        let _service = serve_server(self, stdio()).await
+            .map_err(|e| ServerError::Transport(format!("Failed to create server: {}", e)))?;
+
+        info!("MCP server stopped");
         Ok(())
     }
+}
 
-    async fn handle_message(&mut self, message: JsonRpcMessage) -> Result<()> {
-        // Try to parse as request first
-        if let Ok(request) = serde_json::from_value::<JsonRpcRequest>(message.clone()) {
-            let response = self.handle_request(request).await?;
-            self.send_response(response).await?;
-            return Ok(());
+impl ServerHandler for McpServer {
+    fn ping(
+        &self,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<(), McpError>> + Send + '_ {
+        async move {
+            debug!("Received ping request");
+            Ok(())
         }
-
-        // Try to parse as notification
-        if let Ok(notification) = serde_json::from_value::<JsonRpcNotification>(message.clone()) {
-            self.handle_notification(notification).await?;
-            return Ok(());
-        }
-
-        // Try to parse as response (client responding to server request)
-        if let Ok(_response) = serde_json::from_value::<JsonRpcResponse>(message) {
-            // Handle client responses if needed
-            tracing::debug!("Received response from client");
-            return Ok(());
-        }
-
-        Err(ServerError::Protocol("Invalid message format".into()))
     }
 
-    async fn handle_request(&mut self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
-        if let Some(handler) = self.request_handlers.get(&request.method) {
-            return handler(request);
+    fn initialize(
+        &self,
+        _request: InitializeRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<InitializeResult, McpError>> + Send + '_ {
+        async move {
+            debug!("Initialization complete");
+            Ok(self.get_info())
         }
-
-        // Return method not found error
-        Ok(JsonRpcResponse {
-            jsonrpc: "2.0".to_string(),
-            id: request.id,
-            result: None,
-            error: Some(JsonRpcError {
-                code: -32601,
-                message: "Method not found".to_string(),
-                data: None,
-            }),
-        })
     }
 
-    async fn handle_notification(&mut self, notification: JsonRpcNotification) -> Result<()> {
-        match notification.method.as_str() {
-            "notifications/initialized" => {
-                tracing::info!("Client initialized");
-            }
-            _ => {
-                tracing::debug!("Received notification: {}", notification.method);
-            }
+    fn complete(
+        &self,
+        _request: rmcp::model::CompleteRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::CompleteResult, McpError>> + Send + '_ {
+        async move {
+            // Not implemented - return method not found error
+            Err(McpError::method_not_found::<rmcp::model::CompleteRequestMethod>())
         }
-        Ok(())
     }
 
-    async fn send_response(&mut self, response: JsonRpcResponse) -> Result<()> {
-        let transport = self.transport.as_mut()
-            .ok_or_else(|| ServerError::Transport("No transport configured".into()))?;
-
-        let message = serde_json::to_value(&response)?;
-        transport.send(message).await
+    fn set_level(
+        &self,
+        _request: rmcp::model::SetLevelRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<(), McpError>> + Send + '_ {
+        async move {
+            info!("Client has completed initialization");
+            Ok(())
+        }
     }
 
-    pub async fn send_notification(&mut self, method: &str, params: Option<serde_json::Value>) -> Result<()> {
-        let transport = self.transport.as_mut()
-            .ok_or_else(|| ServerError::Transport("No transport configured".into()))?;
-
-        let notification = JsonRpcNotification {
-            jsonrpc: "2.0".to_string(),
-            method: method.to_string(),
-            params,
-        };
-
-        let message = serde_json::to_value(&notification)?;
-        transport.send(message).await
+    fn get_prompt(
+        &self,
+        _request: rmcp::model::GetPromptRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::GetPromptResult, McpError>> + Send + '_ {
+        async move {
+            Err(McpError::method_not_found::<rmcp::model::GetPromptRequestMethod>())
+        }
     }
 
-    fn register_default_handlers(&mut self) {
-        // Initialize handler
-        let server_info = self.server_info.clone();
-        let capabilities = self.capabilities.clone();
-        self.add_request_handler("initialize", move |request| {
-            let _init_request: InitializeRequest =
-                serde_json::from_value(request.params.unwrap_or_default())?;
-
-            let response = InitializeResponse {
-                protocol_version: "2024-11-05".to_string(),
-                capabilities: capabilities.clone(),
-                server_info: server_info.clone(),
-            };
-
-            Ok(JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: Some(serde_json::to_value(response)?),
-                error: None,
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ListPromptsResult, McpError>> + Send + '_ {
+        async move {
+            Ok(rmcp::model::ListPromptsResult {
+                prompts: vec![],
+                next_cursor: None,
             })
-        });
+        }
+    }
 
-        // Tools list handler
-        let tools = Arc::new(Mutex::new(self.tools.clone()));
-        self.add_request_handler("tools/list", move |request| {
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ListResourcesResult, McpError>> + Send + '_ {
+        async move {
+            Ok(rmcp::model::ListResourcesResult {
+                resources: vec![],
+                next_cursor: None,
+            })
+        }
+    }
+
+    fn list_resource_templates(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ListResourceTemplatesResult, McpError>> + Send + '_ {
+        async move {
+            Ok(rmcp::model::ListResourceTemplatesResult {
+                resource_templates: vec![],
+                next_cursor: None,
+            })
+        }
+    }
+
+    fn read_resource(
+        &self,
+        _request: rmcp::model::ReadResourceRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<rmcp::model::ReadResourceResult, McpError>> + Send + '_ {
+        async move {
+            Err(McpError::method_not_found::<rmcp::model::ReadResourceRequestMethod>())
+        }
+    }
+
+    fn subscribe(
+        &self,
+        _request: rmcp::model::SubscribeRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<(), McpError>> + Send + '_ {
+        async move {
+            Ok(())
+        }
+    }
+
+    fn unsubscribe(
+        &self,
+        _request: rmcp::model::UnsubscribeRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<(), McpError>> + Send + '_ {
+        async move {
+            Ok(())
+        }
+    }
+
+    fn call_tool(
+        &self,
+        request: CallToolRequestParam,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<CallToolResult, McpError>> + Send + '_ {
+        async move {
+            debug!("Tool execution started");
+
+            let handlers = self.tool_handlers.lock().await;
+            if let Some(handler) = handlers.get(request.name.as_ref()) {
+                match handler(request) {
+                    Ok(result) => Ok(result),
+                    Err(e) => Ok(Self::error_result(format!("Tool execution failed: {}", e))),
+                }
+            } else {
+                let error_msg = format!("Tool '{}' not found", request.name);
+                Ok(Self::error_result(error_msg))
+            }
+        }
+    }
+
+    fn list_tools(
+        &self,
+        _request: Option<PaginatedRequestParam>,
+        _context: RequestContext<RoleServer>,
+    ) -> impl std::future::Future<Output = Result<ListToolsResult, McpError>> + Send + '_ {
+        async move {
+            debug!("Listing available tools");
+
+            let tools = self.tools.lock().await;
             let tools = tools.clone();
-            tokio::task::block_in_place(|| {
-                let tools = futures::executor::block_on(tools.lock());
 
-                #[derive(serde::Serialize)]
-                struct ToolsListResponse {
-                    tools: Vec<Tool>,
-                }
-
-                let response = ToolsListResponse {
-                    tools: tools.clone(),
-                };
-
-                Ok(JsonRpcResponse {
-                    jsonrpc: "2.0".to_string(),
-                    id: request.id,
-                    result: Some(serde_json::to_value(response)?),
-                    error: None,
-                })
+            info!("Returned {} tools", tools.len());
+            Ok(ListToolsResult {
+                tools,
+                next_cursor: None,
             })
-        });
-
-        // Ping handler
-        self.add_request_handler("ping", |request| {
-            Ok(JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: Some(serde_json::json!({})),
-                error: None,
-            })
-        });
-    }
-
-    pub fn add_tool(&mut self, tool: Tool) {
-        self.tools.push(tool);
-        self.capabilities.tools = Some(ToolsCapability {
-            list_changed: false,
-        });
-    }
-
-    pub async fn close(&mut self) -> Result<()> {
-        if let Some(ref mut transport) = self.transport {
-            transport.close().await?;
         }
-        self.transport = None;
-        Ok(())
+    }
+
+    fn on_cancelled(
+        &self,
+        _notification: CancelledNotificationParam,
+        _context: NotificationContext<RoleServer>,
+    ) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async move {
+            debug!("Received cancellation notification");
+        }
+    }
+
+    fn on_progress(
+        &self,
+        _notification: ProgressNotificationParam,
+        _context: NotificationContext<RoleServer>,
+    ) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async move {
+            debug!("Received progress notification");
+        }
+    }
+
+    fn on_initialized(
+        &self,
+        _context: NotificationContext<RoleServer>,
+    ) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async move {
+            info!("Client has completed initialization");
+        }
+    }
+
+    fn on_roots_list_changed(
+        &self,
+        _context: NotificationContext<RoleServer>,
+    ) -> impl std::future::Future<Output = ()> + Send + '_ {
+        async move {
+            debug!("Roots list changed notification received");
+        }
+    }
+
+    fn get_info(&self) -> rmcp::model::ServerInfo {
+        InitializeResult {
+            protocol_version: ProtocolVersion::V_2024_11_05,
+            capabilities: rmcp::model::ServerCapabilities {
+                tools: Some(rmcp::model::ToolsCapability { list_changed: Some(false) }),
+                ..Default::default()
+            },
+            server_info: rmcp::model::Implementation {
+                name: self.server_info.name.clone(),
+                version: self.server_info.version.clone(),
+                title: self.server_info.title.clone(),
+                icons: self.server_info.icons.clone(),
+                website_url: self.server_info.website_url.clone(),
+            },
+            instructions: None,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_server_creation() {
+        let server = McpServer::new("test-server", "1.0.0")
+            .with_title("Test MCP Server");
+
+        assert_eq!(server.server_info.name, "test-server");
+        assert_eq!(server.server_info.version, "1.0.0");
+        assert_eq!(server.server_info.title, Some("Test MCP Server".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_tool_addition() {
+        let server = McpServer::new("test-server", "1.0.0");
+
+        let tool = Tool {
+            name: "echo".into(),
+            description: Some("Echo tool".into()),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to echo"
+                    }
+                },
+                "required": ["text"]
+            }),
+        };
+
+        let handler: ToolHandler = Arc::new(|request| {
+            let text = request.arguments
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("no text");
+
+            Ok(McpServer::success_result(vec![Content::text(text.to_string())]))
+        });
+
+        server.add_tool(tool, handler).await;
+
+        let tools = server.tools.lock().await;
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].name, "echo");
     }
 }

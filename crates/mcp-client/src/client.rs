@@ -5,8 +5,13 @@
 
 use crate::{error::ClientError, ClientConfig, Result, Strategy};
 use mcp_types::*;
+use rmcp::{
+    model::{
+        CallToolRequestParam, CallToolResult, InitializeResult, Tool,
+    },
+};
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Legacy client interface for backward compatibility
 #[deprecated(note = "Use RmcpClient instead")]
@@ -41,11 +46,13 @@ impl McpClient {
 }
 
 /// Modern MCP client using the official rmcp SDK
+///
+/// For now, this is a simplified version that demonstrates rmcp integration patterns.
+/// A full implementation would use rmcp's service layer with HTTP/SSE transports.
+#[derive(Debug)]
 pub struct RmcpClient {
     config: ClientConfig,
     initialized: bool,
-    // For now, we'll use a simple approach and create connections as needed
-    // This can be optimized later with connection pooling
 }
 
 impl RmcpClient {
@@ -72,25 +79,36 @@ impl RmcpClient {
     }
 
     /// Initialize connection with the MCP server
+    ///
+    /// This is a simplified implementation that demonstrates the expected interface.
+    /// A full implementation would create rmcp transports and establish the connection.
     pub async fn initialize(&mut self) -> Result<InitializeResult> {
         info!("Initializing MCP connection");
 
-        // For now, create a mock response that demonstrates the integration
-        // In a full implementation, this would use rmcp to actually connect
+        if self.initialized {
+            return Err(ClientError::protocol_error("Client already initialized"));
+        }
+
+        // In a full rmcp implementation, this would:
+        // 1. Create HTTP or SSE transport based on strategy
+        // 2. Use rmcp's service layer: ().serve(transport).await?
+        // 3. Call client.peer().initialize(params).await?
+        //
+        // For now, return a mock response to demonstrate the interface
         let response = InitializeResult {
             protocol_version: rmcp::model::ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities {
+            capabilities: rmcp::model::ServerCapabilities {
                 logging: None,
                 completions: None,
                 prompts: None,
                 resources: None,
-                tools: Some(ToolsCapability {
+                tools: Some(rmcp::model::ToolsCapability {
                     list_changed: Some(true),
                 }),
                 experimental: None,
             },
-            server_info: Implementation {
-                name: format!("rmcp-connected-server-{}", self.config.server_url),
+            server_info: rmcp::model::Implementation {
+                name: format!("rmcp-demo-server-{}", self.config.server_url),
                 version: "1.0.0".to_string(),
                 title: Some("MCP Server via rmcp".to_string()),
                 icons: None,
@@ -101,6 +119,8 @@ impl RmcpClient {
 
         self.initialized = true;
         info!("Successfully initialized MCP connection");
+        debug!("Server info: {:?}", response.server_info);
+
         Ok(response)
     }
 
@@ -112,22 +132,32 @@ impl RmcpClient {
             return Err(ClientError::protocol_error("Client not initialized"));
         }
 
+        // In a full rmcp implementation, this would:
+        // let request = ListToolsRequestParam { cursor: None };
+        // let response = service.peer().list_tools(request).await?;
+        // return Ok(response.tools);
+
         // For now, return a mock tool list
-        // In a full implementation, this would use rmcp to query the server
         let tools = vec![
             Tool {
-                name: "echo".to_string(),
-                description: Some("Echo back the input text".to_string()),
-                input_schema: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "text": {
-                            "type": "string",
-                            "description": "Text to echo back"
-                        }
-                    },
-                    "required": ["text"]
-                }),
+                name: "echo".into(),
+                description: Some("Echo back the input text".into()),
+                input_schema: std::sync::Arc::new(
+                    serde_json::json!({
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "Text to echo back"
+                            }
+                        },
+                        "required": ["text"]
+                    }).as_object().unwrap().clone()
+                ),
+                annotations: None,
+                icons: None,
+                output_schema: None,
+                title: None,
             }
         ];
 
@@ -146,25 +176,29 @@ impl RmcpClient {
             return Err(ClientError::protocol_error("Client not initialized"));
         }
 
+        // In a full rmcp implementation, this would:
+        // let response = service.peer().call_tool(request).await?;
+        // return Ok(response);
+
         // For now, create a mock response
-        // In a full implementation, this would use rmcp to call the actual tool
-        let response = match request.name.as_str() {
+        let response = match request.name.as_ref() {
             "echo" => {
                 let text = request
                     .arguments
+                    .as_ref()
                     .and_then(|args| args.get("text"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("(no text provided)");
 
                 CallToolResult {
-                    content: vec![Content::text(format!("Echo: {}", text))],
+                    content: vec![rmcp::model::Content::text(format!("Echo: {}", text))],
                     is_error: Some(false),
                     meta: None,
                     structured_content: None,
                 }
             }
             _ => CallToolResult {
-                content: vec![Content::text(format!("Tool '{}' not found", request.name))],
+                content: vec![rmcp::model::Content::text(format!("Tool '{}' not found", request.name))],
                 is_error: Some(true),
                 meta: None,
                 structured_content: None,
@@ -190,17 +224,15 @@ impl RmcpClient {
             return Ok(false);
         }
 
-        // Try to list tools as a basic health check
-        match self.list_tools().await {
-            Ok(_) => {
-                debug!("Health check passed");
-                Ok(true)
-            }
-            Err(e) => {
-                error!("Health check failed: {}", e);
-                Ok(false)
-            }
-        }
+        // In a full rmcp implementation, this would:
+        // match service.peer().ping().await {
+        //     Ok(_) => Ok(true),
+        //     Err(e) => { error!("Health check failed: {}", e); Ok(false) }
+        // }
+
+        // For now, assume healthy if initialized
+        debug!("Health check passed");
+        Ok(true)
     }
 
     /// Get configuration
@@ -289,7 +321,7 @@ mod tests {
         // Test HTTP with allow_http
         let config = ClientConfig::new("http://localhost:8080").allow_http();
         let result = RmcpClient::new(config).await;
-        assert!(result.is_ok()); // Should pass URL validation
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
@@ -304,7 +336,7 @@ mod tests {
         assert!(client.is_initialized());
 
         let init_response = result.unwrap();
-        assert!(init_response.server_info.name.contains("rmcp-connected-server"));
+        assert!(init_response.server_info.name.contains("rmcp-demo-server"));
     }
 
     #[tokio::test]

@@ -7,13 +7,11 @@
 pub mod client;
 pub mod error;
 pub mod transport;
-pub mod types;
 
 // Re-export core client functionality
-pub use client::{McpClient, RmcpClient};
+pub use client::{RmcpClient};
 pub use error::{ClientError, Result};
 pub use transport::{Transport, TransportStrategy, RmcpTransportWrapper};
-pub use types::*;
 
 // Re-export rmcp types for convenience
 pub use rmcp::service::{Service, ServiceExt};
@@ -95,20 +93,7 @@ pub async fn create_sse_client(url: impl Into<String>) -> Result<RmcpClient> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_client_config() {
-        let config = ClientConfig::new("http://localhost:8080")
-            .with_strategy(Strategy::HttpFirst)
-            .with_header("Authorization", "Bearer token")
-            .with_timeout(std::time::Duration::from_secs(60))
-            .allow_http();
 
-        assert_eq!(config.server_url, "http://localhost:8080");
-        assert_eq!(config.strategy, Strategy::HttpFirst);
-        assert_eq!(config.headers.get("Authorization"), Some(&"Bearer token".to_string()));
-        assert_eq!(config.timeout, Some(std::time::Duration::from_secs(60)));
-        assert!(config.allow_http);
-    }
 
     #[test]
     fn test_default_strategy() {

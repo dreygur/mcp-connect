@@ -11,7 +11,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Official MCP Rust SDK - primary dependency
-rmcp = { version = "0.7.0", features = ["client", "server", "auth", "reqwest", "transport-streamable-http-client-reqwest", "transport-sse-client-reqwest", "transport-child-process"] }
+rmcp = { version = "0.7.0", features = ["client", "server", "auth", "reqwest", "transport-streamable-http-client-reqwest", "transport-sse-client-reqwest", "transport-child-process", "transport-io"] }
 
 # Core dependencies (some provided by rmcp, kept for clarity)
 tokio = { version = "1.0", features = ["full"] }

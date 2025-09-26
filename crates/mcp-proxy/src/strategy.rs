@@ -1,7 +1,7 @@
-//! Transport strategy for connecting to remote MCP servers
+//! Transport strategy for connecting to remote MCP servers using rmcp SDK
 
 use crate::error::{ProxyError, Result};
-use mcp_client::{HttpTransport, SseTransport, Transport};
+use rmcp::service::{serve_client, ServiceExt, DynService, RoleClient};
 
 #[derive(Debug, Clone)]
 pub enum TransportStrategy {
@@ -23,67 +23,82 @@ impl Default for TransportStrategy {
     }
 }
 
-pub async fn create_remote_transport(
+/// Create a remote service using the specified transport strategy
+///
+/// Note: HTTP and SSE transports are not yet implemented in this version.
+/// This is a placeholder that will be completed once we have proper rmcp transport imports.
+pub async fn create_remote_service(
     server_url: &str,
     strategy: TransportStrategy,
     headers: &[String],
-) -> Result<(Box<dyn Transport>, TransportType)> {
+) -> Result<(Box<dyn DynService<RoleClient>>, TransportType)> {
     match strategy {
         TransportStrategy::HttpFirst => {
-            // Try HTTP first
-            match HttpTransport::new(server_url).and_then(|t| t.with_headers(headers)) {
-                Ok(mut transport) => {
-                    if transport.connect().await.is_ok() {
-                        return Ok((Box::new(transport), TransportType::Http));
-                    }
+            // Try HTTP first, fallback to SSE
+            match try_http_connection(server_url, headers).await {
+                Ok((service, transport_type)) => Ok((service, transport_type)),
+                Err(_) => {
+                    tracing::warn!("HTTP connection failed, trying SSE");
+                    try_sse_connection(server_url).await
                 }
-                Err(_) => {}
-            }
-
-            // Fallback to SSE
-            match SseTransport::new(server_url) {
-                Ok(mut transport) => {
-                    transport.connect().await?;
-                    Ok((Box::new(transport), TransportType::Sse))
-                }
-                Err(e) => Err(ProxyError::ConnectionFailed(format!(
-                    "Failed to connect via both HTTP and SSE: {}",
-                    e
-                ))),
             }
         }
         TransportStrategy::SseFirst => {
-            // Try SSE first
-            match SseTransport::new(server_url) {
-                Ok(mut transport) => {
-                    if transport.connect().await.is_ok() {
-                        return Ok((Box::new(transport), TransportType::Sse));
-                    }
+            // Try SSE first, fallback to HTTP
+            match try_sse_connection(server_url).await {
+                Ok((service, transport_type)) => Ok((service, transport_type)),
+                Err(_) => {
+                    tracing::warn!("SSE connection failed, trying HTTP");
+                    try_http_connection(server_url, headers).await
                 }
-                Err(_) => {}
-            }
-
-            // Fallback to HTTP
-            match HttpTransport::new(server_url).and_then(|t| t.with_headers(headers)) {
-                Ok(mut transport) => {
-                    transport.connect().await?;
-                    Ok((Box::new(transport), TransportType::Http))
-                }
-                Err(e) => Err(ProxyError::ConnectionFailed(format!(
-                    "Failed to connect via both SSE and HTTP: {}",
-                    e
-                ))),
             }
         }
         TransportStrategy::HttpOnly => {
-            let mut transport = HttpTransport::new(server_url)?.with_headers(headers)?;
-            transport.connect().await?;
-            Ok((Box::new(transport), TransportType::Http))
+            try_http_connection(server_url, headers).await
         }
         TransportStrategy::SseOnly => {
-            let mut transport = SseTransport::new(server_url)?;
-            transport.connect().await?;
-            Ok((Box::new(transport), TransportType::Sse))
+            try_sse_connection(server_url).await
         }
     }
+}
+
+/// Try to establish an HTTP connection
+///
+/// TODO: Implement proper HTTP transport once rmcp HTTP transport is available
+async fn try_http_connection(
+    server_url: &str,
+    _headers: &[String],
+) -> Result<(Box<dyn DynService<RoleClient>>, TransportType)> {
+    tracing::debug!("Attempting HTTP connection to: {}", server_url);
+
+    // TODO: Once rmcp HTTP transport is properly imported, implement:
+    // let mut http_transport = rmcp::transport::Http::new(server_url)?;
+    //
+    // // Apply custom headers
+    // for header in headers {
+    //     if let Some((key, value)) = header.split_once(':') {
+    //         http_transport = http_transport.with_header(key.trim(), value.trim());
+    //     }
+    // }
+    //
+    // let service = serve_client((), http_transport).await?;
+    // Ok((service.into_dyn(), TransportType::Http))
+
+    Err(ProxyError::Transport("HTTP transport not yet implemented".into()))
+}
+
+/// Try to establish an SSE connection
+///
+/// TODO: Implement proper SSE transport once rmcp SSE transport is available
+async fn try_sse_connection(
+    server_url: &str,
+) -> Result<(Box<dyn DynService<RoleClient>>, TransportType)> {
+    tracing::debug!("Attempting SSE connection to: {}", server_url);
+
+    // TODO: Once rmcp SSE transport is properly imported, implement:
+    // let sse_transport = rmcp::transport::Sse::new(server_url)?;
+    // let service = serve_client((), sse_transport).await?;
+    // Ok((service.into_dyn(), TransportType::Sse))
+
+    Err(ProxyError::Transport("SSE transport not yet implemented".into()))
 }

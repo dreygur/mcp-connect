@@ -1,4 +1,5 @@
 use std::fmt;
+use serde_json;
 
 pub type Result<T> = std::result::Result<T, ServerError>;
 

@@ -81,7 +81,7 @@ impl From<rmcp::RmcpError> for ClientError {
 
 impl From<rmcp::ErrorData> for ClientError {
     fn from(err: rmcp::ErrorData) -> Self {
-        ClientError::ProtocolError(format!("MCP error {}: {}", err.code, err.message))
+        ClientError::ProtocolError(format!("MCP error {:?}: {}", err.code, err.message))
     }
 }
 

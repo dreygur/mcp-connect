@@ -6,18 +6,14 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+rmcp.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
-async-trait.workspace = true
-uuid.workspace = true
 futures.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
 
 mcp-types = { path = "../mcp-types" }
-mcp-client = { path = "../mcp-client" }
-mcp-server = { path = "../mcp-server" }
 
 [features]
 default = []

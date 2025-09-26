@@ -230,6 +230,12 @@ impl OAuthClient {
         ).await?;
 
         info!("OAuth flow completed successfully!");
+
+        // Clean up coordination lock file
+        if let Err(e) = self.coordination_manager.delete_lockfile().await {
+            debug!("Failed to clean up lock file: {}", e);
+        }
+
         Ok(stored_token.access_token)
     }
 
