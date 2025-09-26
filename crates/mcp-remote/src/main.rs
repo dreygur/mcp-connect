@@ -73,21 +73,32 @@ impl From<TransportStrategyArg> for TransportStrategy {
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    // Initialize logging
-    let log_level = if args.debug {
-        tracing::Level::DEBUG
-    } else {
-        tracing::Level::INFO
-    };
+    // Initialize logging - disable if running under inspector
+    let is_under_inspector = std::env::var("MCP_INSPECTOR").is_ok() ||
+                             std::env::var("MCP_PROXY_AUTH_TOKEN").is_ok();
 
-    tracing_subscriber::fmt()
-        .with_max_level(log_level)
-        .with_target(false)
-        .with_thread_ids(false)
-        .with_file(false)
-        .with_line_number(false)
-        .with_writer(std::io::stderr) // Send logs to stderr, not stdout
-        .init();
+    if !is_under_inspector {
+        let log_level = if args.debug {
+            tracing::Level::DEBUG
+        } else {
+            tracing::Level::INFO
+        };
+
+        tracing_subscriber::fmt()
+            .with_max_level(log_level)
+            .with_target(false)
+            .with_thread_ids(false)
+            .with_file(false)
+            .with_line_number(false)
+            .with_writer(std::io::stderr) // Send logs to stderr, not stdout
+            .init();
+    } else {
+        // Under inspector - disable logging to avoid contaminating MCP protocol
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::ERROR) // Only show critical errors
+            .with_writer(std::io::stderr)
+            .init();
+    }
 
     // Validate server URL
     let server_url = validate_server_url(&args.server_url, args.allow_http)?;

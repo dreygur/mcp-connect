@@ -1,19 +1,17 @@
 use crate::error::{ProxyError, Result};
 use crate::strategy::{create_remote_transport, TransportStrategy, TransportType};
 use mcp_client::McpClient;
-use mcp_server::{McpServer, StdioTransport};
-use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use mcp_server::{StdioTransport, Transport};
+use mcp_types::{JsonRpcMessage, JsonRpcRequest, JsonRpcResponse, JsonRpcNotification};
 use tracing::{debug, error, info, warn};
 
 pub struct McpProxy {
     remote_client: Option<McpClient>,
-    local_server: Option<McpServer>,
+    stdio_transport: Option<StdioTransport>,
     server_url: String,
     transport_strategy: TransportStrategy,
     headers: Vec<String>,
     connected_transport_type: Option<TransportType>,
-    message_queue: Arc<Mutex<Vec<serde_json::Value>>>,
     running: bool,
 }
 
@@ -21,12 +19,11 @@ impl McpProxy {
     pub fn new(server_url: String) -> Self {
         Self {
             remote_client: None,
-            local_server: None,
+            stdio_transport: None,
             server_url,
             transport_strategy: TransportStrategy::default(),
             headers: Vec::new(),
             connected_transport_type: None,
-            message_queue: Arc::new(Mutex::new(Vec::new())),
             running: false,
         }
     }
@@ -47,14 +44,14 @@ impl McpProxy {
         // Create and connect remote client
         self.connect_remote_client().await?;
 
-        // Create local server with STDIO transport
-        self.setup_local_server().await?;
+        // Create STDIO transport
+        self.setup_stdio_transport().await?;
 
         self.running = true;
         info!("MCP proxy started successfully");
 
-        // Start the message forwarding loop
-        self.run_proxy_loop().await
+        // Start the bidirectional message forwarding loop
+        self.run_message_forwarding_loop().await
     }
 
     async fn connect_remote_client(&mut self) -> Result<()> {
@@ -74,107 +71,142 @@ impl McpProxy {
             init_response.server_info.name, init_response.server_info.version
         );
 
-        // Get available tools from remote server
-        // TODO: Implement proper session management for GitHub MCP server
-        // let tools = client.list_tools().await.unwrap_or_default();
-        // info!("Remote server provides {} tools", tools.len());
-        info!("Skipping tool listing for now due to session management");
-
         self.remote_client = Some(client);
         Ok(())
     }
 
-    async fn setup_local_server(&mut self) -> Result<()> {
-        info!("Setting up local STDIO MCP server");
-
-        let transport = Box::new(StdioTransport::new()?);
-        let mut server = McpServer::new("mcp-remote-proxy".to_string(), "0.1.0".to_string())
-            .with_transport(transport);
-
-        // Get tools from remote client and add them to local server
-        // TODO: Implement proper session management for GitHub MCP server
-        // if let Some(ref mut client) = self.remote_client {
-        //     let tools = client.list_tools().await.unwrap_or_default();
-        //     // Tools are now shared types, so no conversion needed
-        //     server = server.with_tools(tools);
-        // }
-
-        // For now, we'll add a simple handler that returns an error
-        // In a full implementation, we'd need a proper async handler system
-        server.add_request_handler("tools/call", |request| {
-            Ok(mcp_types::JsonRpcResponse {
-                jsonrpc: "2.0".to_string(),
-                id: request.id,
-                result: None,
-                error: Some(mcp_types::JsonRpcError {
-                    code: -32603,
-                    message: "Tool forwarding not yet implemented".to_string(),
-                    data: None,
-                }),
-            })
-        });
-
-        self.local_server = Some(server);
+    async fn setup_stdio_transport(&mut self) -> Result<()> {
+        info!("Setting up STDIO transport");
+        let transport = StdioTransport::new()?;
+        self.stdio_transport = Some(transport);
         Ok(())
     }
 
-    async fn run_proxy_loop(&mut self) -> Result<()> {
-        let server = self.local_server.take()
-            .ok_or_else(|| ProxyError::Protocol("Local server not initialized".into()))?;
+    async fn run_message_forwarding_loop(&mut self) -> Result<()> {
+        let mut stdio_transport = self.stdio_transport.take()
+            .ok_or_else(|| ProxyError::Protocol("STDIO transport not initialized".into()))?;
 
-        let (_shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
+        let mut remote_client = self.remote_client.take()
+            .ok_or_else(|| ProxyError::Protocol("Remote client not initialized".into()))?;
 
-        // Spawn server task
-        let server_handle = {
-            let mut server = server;
-            tokio::spawn(async move {
-                if let Err(e) = server.run().await {
-                    error!("Local server error: {}", e);
-                }
-                info!("Local server stopped");
-            })
-        };
-
-        // Spawn remote client message handler
-        let client_handle = {
-            let client = self.remote_client.take();
-            tokio::spawn(async move {
-                if let Some(mut client) = client {
-                    loop {
-                        match client.receive_message().await {
-                            Ok(()) => {
-                                debug!("Processed remote message");
-                            }
-                            Err(e) => {
-                                warn!("Remote client message error: {}", e);
+        loop {
+            tokio::select! {
+                // Handle messages from STDIO (local client)
+                stdio_result = stdio_transport.receive() => {
+                    match stdio_result {
+                        Ok(message) => {
+                            debug!("Received STDIO message");
+                            if let Err(e) = self.handle_stdio_message(&mut stdio_transport, &mut remote_client, message).await {
+                                error!("Error handling STDIO message: {}", e);
                                 break;
                             }
                         }
+                        Err(e) => {
+                            info!("STDIO connection closed: {}", e);
+                            break;
+                        }
                     }
                 }
-                info!("Remote client handler stopped");
-            })
-        };
-
-        // Wait for shutdown signal or task completion
-        tokio::select! {
-            _ = shutdown_rx.recv() => {
-                info!("Received shutdown signal");
-            }
-            _ = server_handle => {
-                info!("Server task completed");
-            }
-            _ = client_handle => {
-                info!("Client task completed");
-            }
-            _ = tokio::signal::ctrl_c() => {
-                info!("Received Ctrl+C, shutting down");
+                // Handle Ctrl+C
+                _ = tokio::signal::ctrl_c() => {
+                    info!("Received Ctrl+C, shutting down");
+                    break;
+                }
             }
         }
 
         self.running = false;
         info!("MCP proxy stopped");
         Ok(())
+    }
+
+    async fn handle_stdio_message(
+        &self,
+        stdio_transport: &mut StdioTransport,
+        remote_client: &mut McpClient,
+        message: JsonRpcMessage,
+    ) -> Result<()> {
+        // Try to parse as request first
+        if let Ok(request) = serde_json::from_value::<JsonRpcRequest>(message.clone()) {
+            debug!("Forwarding request: {}", request.method);
+
+            match request.method.as_str() {
+                "initialize" => {
+                    // Handle initialize locally - proxy acts as the server
+                    let response = self.handle_initialize_request(request).await?;
+                    stdio_transport.send(serde_json::to_value(&response)?).await?;
+                }
+                "ping" => {
+                    // Handle ping locally - simple pong response
+                    let response = self.handle_ping_request(request).await?;
+                    stdio_transport.send(serde_json::to_value(&response)?).await?;
+                }
+                _ => {
+                    // Forward other requests to remote server
+                    let response = remote_client.send_request(&request.method, request.params).await?;
+                    stdio_transport.send(serde_json::to_value(&response)?).await?;
+                }
+            }
+            return Ok(());
+        }
+
+        // Try to parse as notification
+        if let Ok(notification) = serde_json::from_value::<JsonRpcNotification>(message.clone()) {
+            debug!("Forwarding notification: {}", notification.method);
+
+            match notification.method.as_str() {
+                "notifications/initialized" => {
+                    // Handle locally
+                    info!("Client initialized");
+                }
+                _ => {
+                    // Forward to remote server
+                    remote_client.send_notification(&notification.method, notification.params).await?;
+                }
+            }
+            return Ok(());
+        }
+
+        warn!("Received unknown message type");
+        Ok(())
+    }
+
+    async fn handle_initialize_request(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
+        use mcp_types::*;
+
+        let response = InitializeResponse {
+            protocol_version: "2024-11-05".to_string(),
+            capabilities: ServerCapabilities {
+                tools: Some(ToolsCapability {
+                    list_changed: false,
+                }),
+                resources: None,
+                prompts: None,
+                logging: None,
+                completion: None,
+            },
+            server_info: ServerInfo {
+                name: "mcp-remote-proxy".to_string(),
+                version: "0.1.0".to_string(),
+            },
+        };
+
+        Ok(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: request.id,
+            result: Some(serde_json::to_value(response)?),
+            error: None,
+        })
+    }
+
+    async fn handle_ping_request(&self, request: JsonRpcRequest) -> Result<JsonRpcResponse> {
+        // Simple pong response
+        Ok(JsonRpcResponse {
+            jsonrpc: "2.0".to_string(),
+            id: request.id,
+            result: Some(serde_json::json!({})), // Empty object as pong
+            error: None,
+        })
     }
 
     pub async fn stop(&mut self) -> Result<()> {
@@ -188,8 +220,8 @@ impl McpProxy {
             client.close().await?;
         }
 
-        if let Some(ref mut server) = self.local_server {
-            server.close().await?;
+        if let Some(ref mut transport) = self.stdio_transport {
+            transport.close().await?;
         }
 
         self.running = false;

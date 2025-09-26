@@ -10,6 +10,7 @@ pub enum ProxyError {
     Protocol(String),
     ConnectionFailed(String),
     Timeout,
+    Serialization(serde_json::Error),
 }
 
 impl fmt::Display for ProxyError {
@@ -21,6 +22,7 @@ impl fmt::Display for ProxyError {
             ProxyError::Protocol(msg) => write!(f, "Protocol error: {}", msg),
             ProxyError::ConnectionFailed(msg) => write!(f, "Connection failed: {}", msg),
             ProxyError::Timeout => write!(f, "Operation timed out"),
+            ProxyError::Serialization(err) => write!(f, "Serialization error: {}", err),
         }
     }
 }
@@ -36,5 +38,11 @@ impl From<mcp_client::ClientError> for ProxyError {
 impl From<mcp_server::ServerError> for ProxyError {
     fn from(err: mcp_server::ServerError) -> Self {
         ProxyError::Server(err)
+    }
+}
+
+impl From<serde_json::Error> for ProxyError {
+    fn from(err: serde_json::Error) -> Self {
+        ProxyError::Serialization(err)
     }
 }
