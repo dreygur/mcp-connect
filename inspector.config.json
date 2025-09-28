@@ -22,7 +22,7 @@
         "--endpoint",
         "https://api.githubcopilot.com/mcp",
         "--headers",
-        "\"Authorization: Bearer ${GITHUB_TOKEN}\""
+        "\"Authorization: Bearer ${PAT_GITHUB}\""
       ]
     },
     "cc": {
@@ -32,7 +32,7 @@
         "--endpoint",
         "https://mcp.context7.com/mcp",
         "--headers",
-        "\"Authorization: Bearer ${CONTEXT7_API_KEY}\""
+        "\"Authorization: Bearer ${PAT_CONTEXT7}\""
       ]
     }
   }

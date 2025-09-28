@@ -214,29 +214,30 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
   "context_servers": {
     "Context7": {
       "source": "custom",
-      "command": "npx",
+      "command": "./target/release/mcp-remote",
       "args": [
-        "-y",
-        "@upstash/context7-mcp",
-        "--api-key",
-        "${CONTEXT7_API_KEY}"
+        "proxy",
+        "--endpoint",
+        "https://mcp.context7.com/mcp",
+        "--headers",
+        "\"Authorization: Bearer ${PAT_CONTEXT7}\""
       ],
       "env": {
-        "CONTEXT7_API_KEY": "your-api-key"
+        "PAT_CONTEXT7": "your-api-key"
       }
     },
     "Github": {
       "source": "custom",
-      "command": "npx",
+      "command": "./target/release/mcp-remote",
       "args": [
-        "-y",
-        "mcp-remote",
+        "proxy",
+        "--endpoint",
         "https://api.githubcopilot.com/mcp",
-        "--header",
-        "Authorization: Bearer ${GITHUB_TOKEN}"
+        "--headers",
+        "\"Authorization: Bearer ${PAT_GITHUB}\""
       ],
       "env": {
-        "GITHUB_TOKEN": "your-github-token"
+        "PAT_GITHUB": "your-github-token"
       }
     }
   }
@@ -255,23 +256,23 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
         "--endpoint",
         "https://api.githubcopilot.com/mcp",
         "--headers",
-        "\"Authorization: Bearer ${GITHUB_TOKEN}\""
+        "\"Authorization: Bearer ${PAT_GITHUB}\""
       ],
       "env": {
-        "GITHUB_TOKEN": "your-github-token"
+        "PAT_GITHUB": "your-github-token"
       }
     },
-    "cc": {
+    "Context7": {
       "command": "./target/release/mcp-remote",
       "args": [
         "proxy",
         "--endpoint",
         "https://mcp.context7.com/mcp",
         "--headers",
-        "\"Authorization: Bearer ${CONTEXT7_API_KEY}\""
+        "\"Authorization: Bearer ${PAT_CONTEXT7}\""
       ],
       "env": {
-        "CONTEXT7_API_KEY": "your-api-key"
+        "PAT_CONTEXT7": "your-api-key"
       }
     }
   }
