@@ -1,3 +1,37 @@
+//! # MCP Remote Proxy CLI
+//!
+//! Command-line interface for the Model Context Protocol (MCP) remote proxy system.
+//!
+//! This application bridges local MCP clients with remote MCP servers, providing:
+//! - Multiple transport support (HTTP, STDIO, TCP)
+//! - Authentication handling (Bearer tokens, API keys, OAuth 2.1)
+//! - Fallback mechanisms and load balancing
+//! - Comprehensive logging and debugging
+//!
+//! ## Usage
+//!
+//! Basic proxy operation:
+//! ```bash
+//! mcp-remote proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+//! ```
+//!
+//! With fallbacks:
+//! ```bash
+//! mcp-remote proxy --endpoint "https://api.example.com/mcp" --fallbacks "stdio,tcp"
+//! ```
+//!
+//! Load balancing:
+//! ```bash
+//! mcp-remote load-balance --endpoints "server1,server2,server3" --transport "http"
+//! ```
+//!
+//! ## Commands
+//!
+//! - `proxy`: Run as STDIO proxy (main mode)
+//! - `test`: Test connection to remote server
+//! - `load-balance`: Distribute requests across multiple servers
+//! - `notification-demo`: Test MCP notification system
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use mcp_client::{McpRemoteClient, transport::TransportConfig};
@@ -11,17 +45,24 @@ use std::time::Duration;
 use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
+/// Command-line interface for MCP Remote Proxy.
+///
+/// This structure defines the main CLI interface using clap, providing
+/// global options and subcommands for different proxy operations.
 #[derive(Parser)]
 #[command(name = "mcp-remote")]
 #[command(about = "MCP Remote Proxy - Bridge local MCP clients to remote MCP servers")]
 #[command(version = "0.1.0")]
 struct Cli {
+    /// The subcommand to execute
     #[command(subcommand)]
     command: Commands,
 
+    /// Enable debug logging for detailed troubleshooting
     #[arg(long, global = true, help = "Enable debug logging")]
     debug: bool,
 
+    /// Set the log level (trace, debug, info, warn, error)
     #[arg(long, global = true, help = "Set log level")]
     log_level: Option<String>,
 }
