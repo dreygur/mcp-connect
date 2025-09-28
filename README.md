@@ -1,97 +1,141 @@
 # MCP Remote Proxy
 
-A Rust implementation of a Model Context Protocol (MCP) remote proxy system that enables bridging local MCP clients to remote MCP servers with multiple transport options and fallback mechanisms.
+Ever wanted to connect your local MCP client to a remote server but hit a wall with transport compatibility? This Rust-based proxy bridges that gap, letting you connect local MCP applications to remote servers regardless of how they communicate.
 
-## Features
+## What it does
 
-- **Multiple Transport Support**: HTTP (Streamable HTTP), STDIO, and TCP transports
-- **Fallback Mechanisms**: Automatic fallback between transport types on connection failure
-- **Load Balancing**: Distribute requests across multiple remote servers
-- **Debug Logging**: Configurable logging with `--debug` flag support
-- **Protocol Compliance**: Full MCP 2024-11-05 protocol specification compliance
-- **Async/Await**: Built with Tokio for high-performance async operations
+This tool acts as a translator between your local MCP client and remote servers. It supports multiple ways to connect (HTTP, STDIO, TCP) and automatically falls back to alternatives if one doesn't work. Plus, it handles OAuth authentication, load balancing across multiple servers, and gives you detailed logging when things go wrong.
 
-## Architecture
+Key capabilities:
 
-The project is organized as a Rust workspace with the following crates:
+- Connect via HTTP, STDIO, or TCP - whatever works
+- OAuth 2.1 authentication for secure connections
+- Smart fallbacks when connections fail
+- Load balancing across multiple remote servers
+- Detailed debug logging to troubleshoot issues
+- Full compatibility with MCP 2024-11-05 specification
+
+## How it's built
+
+The project is split into several focused modules:
 
 ```
 ├── crates/
-│   ├── mcp-types/      # Shared types and traits
-│   ├── mcp-server/     # MCP server implementation with STDIO transport
-│   ├── mcp-client/     # MCP client with multiple transport support
-│   ├── mcp-proxy/      # Proxy implementation with strategies
-│   └── mcp-remote/     # CLI application
-└── examples/           # Usage examples and tests
+│   ├── mcp-types/      # Common data types and interfaces
+│   ├── mcp-server/     # Server-side MCP implementation
+│   ├── mcp-client/     # Client that talks to remote servers
+│   ├── mcp-proxy/      # The magic happens here - message forwarding
+│   └── mcp-remote/     # Command-line tool you'll actually use
+└── examples/           # Sample usage and tests
 ```
 
-### Component Overview
+Here's what each piece does:
 
-- **MCP Server** (`mcp-server`): STDIO-based MCP server with configurable debug logging
-- **MCP Client** (`mcp-client`): Multi-transport client supporting HTTP, STDIO, and TCP
-- **MCP Proxy** (`mcp-proxy`): Bidirectional message forwarding with multiple strategies
-- **MCP Remote** (`mcp-remote`): CLI tool for running proxies and testing connections
+- **mcp-server**: Handles the local side, talking to your MCP client via STDIO
+- **mcp-client**: Connects to remote servers using HTTP, STDIO, or TCP
+- **mcp-proxy**: Sits in the middle, forwarding messages back and forth
+- **mcp-remote**: The CLI tool that ties everything together
 
-## Installation
+## Getting started
 
-### Prerequisites
-
-- Rust 1.75 or later
-- Cargo
-
-### Build from Source
+You'll need Rust 1.75+ and Cargo installed. Then it's pretty straightforward:
 
 ```bash
+# Clone and build
 git clone <repository-url>
 cd tokio-night-gnome
 cargo build --release
+
+# Or install it system-wide
+cargo install --path crates/mcp-remote
 ```
 
-### Install Locally
+### Troubleshooting
+
+**OpenSSL errors** (like `libssl.so.3: cannot open shared object file`):
 
 ```bash
-cargo install --path crates/mcp-remote
+# Install OpenSSL 3.x
+sudo apt install libssl3 libssl-dev  # Ubuntu/Debian
+sudo dnf install openssl-devel       # Fedora/RHEL
+
+# Or rebuild with static OpenSSL
+cargo clean
+OPENSSL_STATIC=1 cargo build --release
+```
+
+**Connection errors** (like `MCP error -32000: Connection closed`):
+
+This usually means authentication is missing or wrong:
+
+```bash
+# Test if the endpoint needs auth
+mcp-remote test --endpoint "https://your-server.com/mcp"
+
+# Add authentication (Context7 example)
+mcp-remote proxy \
+  --endpoint "https://mcp.context7.com/mcp" \
+  --auth-token "ctx7sk-your-api-key" \
+  --debug
+
+# Check what's happening with full debug
+mcp-remote proxy \
+  --endpoint "https://your-server.com/mcp" \
+  --debug \
+  --log-level "debug"
 ```
 
 ## Usage
 
-### Basic HTTP Proxy
+### Simple HTTP proxy
 
-Forward requests from local STDIO to a remote HTTP MCP server:
+Want to connect your local MCP client to a remote HTTP server? Just point it at the endpoint:
 
 ```bash
 mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
 ```
 
-### Proxy with Authentication
+### Authentication
 
-Use Bearer token or API key authentication:
+Most real servers need authentication. Here are the common patterns:
 
 ```bash
-# With Bearer token
+# Bearer token (like GitHub Copilot)
 mcp-remote proxy \
   --endpoint "https://api.githubcopilot.com/mcp" \
   --auth-token "your-bearer-token" \
   --debug
 
-# With API key
+# API key
 mcp-remote proxy \
   --endpoint "https://api.example.com/mcp" \
   --api-key "your-api-key" \
   --debug
 
-# With custom headers
+# OAuth 2.1 flow (for more complex auth)
+mcp-remote auth-proxy \
+  --endpoint "https://oauth-server.com/mcp" \
+  --client-id "your-client-id" \
+  --client-secret "your-client-secret" \
+  --auth-url "https://oauth-server.com/oauth/authorize" \
+  --token-url "https://oauth-server.com/oauth/token" \
+  --redirect-url "http://localhost:8080/callback" \
+  --scopes "read,write" \
+  --debug
+
+# Custom headers for anything else
 mcp-remote proxy \
   --endpoint "http://remote-server:8080/mcp" \
   --headers "Authorization:Bearer token123,X-Custom:value" \
   --debug
 ```
 
-### Proxy with Fallbacks
+### Fallbacks and reliability
 
-Use HTTP as primary, with STDIO and TCP as fallbacks:
+Sometimes connections fail. The proxy can try different transport methods automatically:
 
 ```bash
+# Try HTTP first, fall back to STDIO then TCP
 mcp-remote proxy \
   --endpoint "http://remote-server:8080/mcp" \
   --fallbacks "stdio,tcp" \
@@ -101,9 +145,9 @@ mcp-remote proxy \
   --debug
 ```
 
-### Load Balancing
+### Load balancing
 
-Distribute requests across multiple servers:
+Got multiple servers? Spread the load:
 
 ```bash
 mcp-remote load-balance \
@@ -246,7 +290,7 @@ export CONTEXT7_API_KEY="your-actual-api-key"
 1. **HTTP (Streamable HTTP)**: Primary transport for remote servers
    - Supports MCP-Session-Id headers
    - Handles 202 Accepted responses
-   - OAuth 2.1 ready (future enhancement)
+   - Full OAuth 2.1 authentication support
 
 2. **STDIO**: For subprocess-based MCP servers
    - Spawns and manages subprocesses
