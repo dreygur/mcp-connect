@@ -4,6 +4,7 @@ use mcp_client::{McpRemoteClient, transport::TransportConfig};
 use mcp_proxy::{stdio_proxy::StdioProxyBuilder, strategy::{ForwardingStrategy, LoadBalancingStrategy}};
 use mcp_types::{TransportType, McpClient};
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn, Level};
@@ -172,6 +173,45 @@ fn build_transport_config(
     Ok(config)
 }
 
+// Custom writer that either writes to stderr (debug mode) or discards (non-debug mode)
+struct ConditionalWriter {
+    debug_mode: bool,
+}
+
+impl ConditionalWriter {
+    fn new(debug_mode: bool) -> Self {
+        Self { debug_mode }
+    }
+}
+
+impl Write for ConditionalWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if self.debug_mode {
+            // In debug mode, write to stderr so it doesn't interfere with STDIO MCP protocol
+            io::stderr().write(buf)
+        } else {
+            // In non-debug mode, discard the output
+            Ok(buf.len())
+        }
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.debug_mode {
+            io::stderr().flush()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl tracing_subscriber::fmt::MakeWriter<'_> for ConditionalWriter {
+    type Writer = Self;
+
+    fn make_writer(&self) -> Self::Writer {
+        ConditionalWriter::new(self.debug_mode)
+    }
+}
+
 fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
     let level = if debug {
         Level::DEBUG
@@ -188,11 +228,14 @@ fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
         Level::INFO
     };
 
+    let writer = ConditionalWriter::new(debug);
+
     let subscriber = FmtSubscriber::builder()
         .with_max_level(level)
         .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
+        .with_writer(writer)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)?;
