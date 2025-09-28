@@ -25,7 +25,7 @@ The project is split into several focused modules:
 │   ├── mcp-server/     # Server-side MCP implementation
 │   ├── mcp-client/     # Client that talks to remote servers
 │   ├── mcp-proxy/      # The magic happens here - message forwarding
-│   └── mcp-remote/     # Command-line tool you'll actually use
+│   └── mcp-connect/     # Command-line tool you'll actually use
 └── examples/           # Sample usage and tests
 ```
 
@@ -34,7 +34,7 @@ Here's what each piece does:
 - **mcp-server**: Handles the local side, talking to your MCP client via STDIO
 - **mcp-client**: Connects to remote servers using HTTP, STDIO, or TCP
 - **mcp-proxy**: Sits in the middle, forwarding messages back and forth
-- **mcp-remote**: The CLI tool that ties everything together
+- **mcp-connect**: The CLI tool that ties everything together
 
 ## Getting started
 
@@ -47,7 +47,7 @@ cd tokio-night-gnome
 cargo build --release
 
 # Or install it system-wide
-cargo install --path crates/mcp-remote
+cargo install --path crates/mcp-connect
 ```
 
 ### Troubleshooting
@@ -70,16 +70,16 @@ This usually means authentication is missing or wrong:
 
 ```bash
 # Test if the endpoint needs auth
-mcp-remote test --endpoint "https://your-server.com/mcp"
+mcp-connect test --endpoint "https://your-server.com/mcp"
 
 # Add authentication (Context7 example)
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "https://mcp.context7.com/mcp" \
   --auth-token "ctx7sk-your-api-key" \
   --debug
 
 # Check what's happening with full debug
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "https://your-server.com/mcp" \
   --debug \
   --log-level "debug"
@@ -92,7 +92,7 @@ mcp-remote proxy \
 Want to connect your local MCP client to a remote HTTP server? Just point it at the endpoint:
 
 ```bash
-mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
+mcp-connect proxy --endpoint "http://remote-server:8080/mcp" --debug
 ```
 
 ### Authentication
@@ -101,19 +101,19 @@ Most real servers need authentication. Here are the common patterns:
 
 ```bash
 # Bearer token (like GitHub Copilot)
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "https://api.githubcopilot.com/mcp" \
   --auth-token "your-bearer-token" \
   --debug
 
 # API key
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "https://api.example.com/mcp" \
   --api-key "your-api-key" \
   --debug
 
 # OAuth 2.1 flow (for more complex auth)
-mcp-remote auth-proxy \
+mcp-connect auth-proxy \
   --endpoint "https://oauth-server.com/mcp" \
   --client-id "your-client-id" \
   --client-secret "your-client-secret" \
@@ -124,7 +124,7 @@ mcp-remote auth-proxy \
   --debug
 
 # Custom headers for anything else
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "http://remote-server:8080/mcp" \
   --headers "Authorization:Bearer token123,X-Custom:value" \
   --debug
@@ -136,7 +136,7 @@ Sometimes connections fail. The proxy can try different transport methods automa
 
 ```bash
 # Try HTTP first, fall back to STDIO then TCP
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "http://remote-server:8080/mcp" \
   --fallbacks "stdio,tcp" \
   --timeout 30 \
@@ -150,7 +150,7 @@ mcp-remote proxy \
 Got multiple servers? Spread the load:
 
 ```bash
-mcp-remote load-balance \
+mcp-connect load-balance \
   --endpoints "http://server1:8080/mcp,http://server2:8080/mcp,http://server3:8080/mcp" \
   --transport "http" \
   --timeout 30 \
@@ -165,19 +165,19 @@ Test connectivity to a remote server:
 
 ```bash
 # Test HTTP connection
-mcp-remote test --endpoint "http://remote-server:8080/mcp" --transport "http"
+mcp-connect test --endpoint "http://remote-server:8080/mcp" --transport "http"
 
 # Test with authentication
-mcp-remote test \
+mcp-connect test \
   --endpoint "https://api.githubcopilot.com/mcp" \
   --transport "http" \
   --auth-token "your-token"
 
 # Test TCP connection
-mcp-remote test --endpoint "localhost:9090" --transport "tcp"
+mcp-connect test --endpoint "localhost:9090" --transport "tcp"
 
 # Test STDIO connection
-mcp-remote test --endpoint "python my-server.py" --transport "stdio"
+mcp-connect test --endpoint "python my-server.py" --transport "stdio"
 ```
 
 ### Notification Demo
@@ -186,7 +186,7 @@ Test MCP notification system:
 
 ```bash
 # Send 3 demo notifications
-mcp-remote notification-demo --count 3
+mcp-connect notification-demo --count 3
 ```
 
 ### Global Options
@@ -214,7 +214,7 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
   "context_servers": {
     "Context7": {
       "source": "custom",
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -228,7 +228,7 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
     },
     "Github": {
       "source": "custom",
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -250,7 +250,7 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
 {
   "mcpServers": {
     "github": {
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -263,7 +263,7 @@ Both `.zed/settings.json` and `inspector.config.json` support environment variab
       }
     },
     "Context7": {
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -319,7 +319,7 @@ The server implements different logging strategies based on the `--debug` flag:
 {
   "mcpServers": {
     "remote-proxy": {
-      "command": "mcp-remote",
+      "command": "mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -338,18 +338,18 @@ The server implements different logging strategies based on the `--debug` flag:
 FROM rust:1.75 as builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --bin mcp-remote
+RUN cargo build --release --bin mcp-connect
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/mcp-remote /usr/local/bin/
-ENTRYPOINT ["mcp-remote"]
+COPY --from=builder /app/target/release/mcp-connect /usr/local/bin/
+ENTRYPOINT ["mcp-connect"]
 ```
 
 ```bash
 # Build and run
-docker build -t mcp-remote .
-docker run -i mcp-remote proxy --endpoint "http://host.docker.internal:8080/mcp"
+docker build -t mcp-connect .
+docker run -i mcp-connect proxy --endpoint "http://host.docker.internal:8080/mcp"
 ```
 
 ## CLI Commands
@@ -426,7 +426,7 @@ cargo check --workspace
 cargo build --workspace
 
 # Run with debug output
-cargo run --bin mcp-remote -- proxy --endpoint "http://localhost:8080/mcp" --debug
+cargo run --bin mcp-connect -- proxy --endpoint "http://localhost:8080/mcp" --debug
 ```
 
 ### Integration Testing

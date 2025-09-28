@@ -138,9 +138,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("=== All Tests Completed Successfully! ===");
     println!("\nTo run the actual proxy:");
-    println!("cargo run --bin mcp-remote -- proxy --endpoint 'http://localhost:8080/mcp' --debug");
+    println!("cargo run --bin mcp-connect -- proxy --endpoint 'http://localhost:8080/mcp' --debug");
     println!("\nTo test connection:");
-    println!("cargo run --bin mcp-remote -- test --endpoint 'http://localhost:8080/mcp' --transport http");
+    println!("cargo run --bin mcp-connect -- test --endpoint 'http://localhost:8080/mcp' --transport http");
 
     Ok(())
 }

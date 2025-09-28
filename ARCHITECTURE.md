@@ -36,7 +36,7 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       └── lib.rs         # Common types and traits
-│   └── mcp-remote/            # Remote proxy executable
+│   └── mcp-connect/            # Remote proxy executable
 │       ├── Cargo.toml
 │       └── src/
 │           └── main.rs        # CLI application
@@ -128,7 +128,7 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 - **Traits**: Common interfaces for servers, clients, and proxies
 - **Configuration**: Shared configuration structures
 
-### 5. Remote Proxy Executable (`mcp-remote`)
+### 5. Remote Proxy Executable (`mcp-connect`)
 
 **Responsibilities:**
 
@@ -182,7 +182,7 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 
 ### Phase 4: Integration and Testing
 
-1. Create `mcp-remote` CLI application
+1. Create `mcp-connect` CLI application
 2. Add comprehensive testing
 3. Create usage examples
 

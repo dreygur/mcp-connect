@@ -40,7 +40,7 @@ impl Default for TransportConfig {
             retry_delay: Duration::from_millis(1000),
             headers: HashMap::new(),
             auth_token: None,
-            user_agent: Some("mcp-remote-client/0.1.0".to_string()),
+            user_agent: Some("mcp-connect-client/0.1.0".to_string()),
         }
     }
 }

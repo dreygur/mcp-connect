@@ -4,7 +4,7 @@ members = [
     "crates/mcp-server",
     "crates/mcp-client",
     "crates/mcp-proxy",
-    "crates/mcp-remote"
+    "crates/mcp-connect"
 ]
 resolver = "2"
 

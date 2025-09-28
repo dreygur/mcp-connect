@@ -5,8 +5,8 @@
 
 set -e  # Exit on any error
 
-PROJECT_NAME="mcp-remote"
-BINARY_NAME="mcp-remote"
+PROJECT_NAME="mcp-connect"
+BINARY_NAME="mcp-connect"
 BUILD_DIR="target/release"
 DIST_DIR="dist"
 
@@ -23,7 +23,7 @@ print_success() {
 }
 
 print_error() {
-    echo -e "\n❌ $1"
+    echo -e "\n❌ $1"https://github.com/dreygur/mcp-connect
 }
 
 # Check if we're on Linux for musl target
@@ -152,11 +152,11 @@ MCP Remote Proxy - Standalone Release
 This is a fully static binary with no dependencies.
 
 Quick start:
-1. Make sure the binary is executable: chmod +x mcp-remote
-2. Test connection: ./mcp-remote test --endpoint "https://api.example.com/mcp"
-3. Run proxy: ./mcp-remote proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+1. Make sure the binary is executable: chmod +x mcp-connect
+2. Test connection: ./mcp-connect test --endpoint "https://api.example.com/mcp"
+3. Run proxy: ./mcp-connect proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
 
-For full documentation, see README.md or run: ./mcp-remote --help
+For full documentation, see README.md or run: ./mcp-connect --help
 EOF
 
 # Create version info

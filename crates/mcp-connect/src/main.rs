@@ -12,17 +12,17 @@
 //!
 //! Basic proxy operation:
 //! ```bash
-//! mcp-remote proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+//! mcp-connect proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
 //! ```
 //!
 //! With fallbacks:
 //! ```bash
-//! mcp-remote proxy --endpoint "https://api.example.com/mcp" --fallbacks "stdio,tcp"
+//! mcp-connect proxy --endpoint "https://api.example.com/mcp" --fallbacks "stdio,tcp"
 //! ```
 //!
 //! Load balancing:
 //! ```bash
-//! mcp-remote load-balance --endpoints "server1,server2,server3" --transport "http"
+//! mcp-connect load-balance --endpoints "server1,server2,server3" --transport "http"
 //! ```
 //!
 //! ## Commands
@@ -50,7 +50,7 @@ use tracing_subscriber::FmtSubscriber;
 /// This structure defines the main CLI interface using clap, providing
 /// global options and subcommands for different proxy operations.
 #[derive(Parser)]
-#[command(name = "mcp-remote")]
+#[command(name = "mcp-connect")]
 #[command(about = "MCP Remote Proxy - Bridge local MCP clients to remote MCP servers")]
 #[command(version = "0.1.0")]
 struct Cli {

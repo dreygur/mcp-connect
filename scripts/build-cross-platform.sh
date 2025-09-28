@@ -5,8 +5,8 @@
 
 set -e
 
-PROJECT_NAME="mcp-remote"
-BINARY_NAME="mcp-remote"
+PROJECT_NAME="mcp-connect"
+BINARY_NAME="mcp-connect"
 DIST_DIR="dist-cross"
 
 echo "🌍 Building cross-platform releases for MCP Remote Proxy..."

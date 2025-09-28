@@ -26,7 +26,7 @@
               │          │               │                             │
     ┌─────────┼──────────┼───────────────┼─────────────────────────────┼───┐
     │         │          │               │                             │   │
-mcp-client mcp-proxy mcp-remote         │                         Fallbacks │
+mcp-client mcp-proxy mcp-connect         │                         Fallbacks │
     │         │          │               │                         Load-Bal  │
     │         │          │               │                         Retry     │
     │         │       CLI Tool           │                         Debug     │
@@ -91,7 +91,7 @@ HTTP STDIO TCP     │              │ proxy test load-balance                 
 2. **mcp-server**: Local STDIO MCP server
 3. **mcp-client**: Multi-transport remote client
 4. **mcp-proxy**: Message forwarding engine
-5. **mcp-remote**: CLI application
+5. **mcp-connect**: CLI application
 
 ### 🔌 **Transport Layer**
 

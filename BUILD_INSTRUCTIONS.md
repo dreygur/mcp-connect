@@ -49,7 +49,7 @@ cd tokio-night-gnome
 export OPENSSL_STATIC=1
 cargo build --release
 
-# The binary will be at: target/release/mcp-remote
+# The binary will be at: target/release/mcp-connect
 ```
 
 ### Method 2: Using Build Script
@@ -58,7 +58,7 @@ cargo build --release
 # Use the provided build script
 ./build-static.sh
 
-# Binary will be created in: dist/mcp-remote
+# Binary will be created in: dist/mcp-connect
 ```
 
 ### Method 3: Cross-Platform Build
@@ -173,14 +173,14 @@ cargo build --release --target x86_64-unknown-linux-musl
 
 ```bash
 # Strip debug symbols
-strip target/release/mcp-remote
+strip target/release/mcp-connect
 
 # Use size optimization flags
 export RUSTFLAGS="-C opt-level=z -C lto=yes"
 cargo build --release
 
 # Use UPX compression (optional)
-upx --best target/release/mcp-remote
+upx --best target/release/mcp-connect
 ```
 
 ## Verification
@@ -189,36 +189,36 @@ upx --best target/release/mcp-remote
 
 ```bash
 # Check version
-./mcp-remote --version
+./mcp-connect --version
 
 # Test help output
-./mcp-remote --help
+./mcp-connect --help
 
 # Test basic functionality
-./mcp-remote test --endpoint "https://httpbin.org/post" --timeout 5
+./mcp-connect test --endpoint "https://httpbin.org/post" --timeout 5
 ```
 
 ### Check Dependencies
 
 ```bash
 # On Linux, check dynamic libraries
-ldd ./mcp-remote
+ldd ./mcp-connect
 
 # Check file type
-file ./mcp-remote
+file ./mcp-connect
 
 # Check size
-du -h ./mcp-remote
+du -h ./mcp-connect
 ```
 
 ### Performance Testing
 
 ```bash
 # Test connection speed
-time ./mcp-remote test --endpoint "https://api.example.com/mcp"
+time ./mcp-connect test --endpoint "https://api.example.com/mcp"
 
 # Memory usage
-valgrind --tool=massif ./mcp-remote --help
+valgrind --tool=massif ./mcp-connect --help
 ```
 
 ## Distribution
@@ -230,7 +230,7 @@ valgrind --tool=massif ./mcp-remote --help
 mkdir -p dist
 
 # Copy binary and documentation
-cp target/release/mcp-remote dist/
+cp target/release/mcp-connect dist/
 cp README.md dist/
 cp LICENSE dist/ # if available
 
@@ -238,13 +238,13 @@ cp LICENSE dist/ # if available
 cat > dist/USAGE.txt << 'EOF'
 Quick Start Guide for MCP Remote Proxy
 
-1. Test version: ./mcp-remote --version
-2. Get help: ./mcp-remote --help
-3. Run proxy: ./mcp-remote proxy --endpoint "URL" --auth-token "TOKEN"
+1. Test version: ./mcp-connect --version
+2. Get help: ./mcp-connect --help
+3. Run proxy: ./mcp-connect proxy --endpoint "URL" --auth-token "TOKEN"
 EOF
 
 # Create tarball
-tar -czf mcp-remote-release.tar.gz -C dist .
+tar -czf mcp-connect-release.tar.gz -C dist .
 ```
 
 ### Docker Build (Alternative)
@@ -257,8 +257,8 @@ RUN cargo build --release
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/mcp-remote /usr/local/bin/
-ENTRYPOINT ["mcp-remote"]
+COPY --from=builder /app/target/release/mcp-connect /usr/local/bin/
+ENTRYPOINT ["mcp-connect"]
 ```
 
 ## Continuous Integration
@@ -283,7 +283,7 @@ jobs:
           export OPENSSL_STATIC=1
           cargo build --release
       - name: Test
-        run: ./target/release/mcp-remote --version
+        run: ./target/release/mcp-connect --version
 ```
 
 ## Build Variants
@@ -308,7 +308,7 @@ export RUSTFLAGS="-C profile-generate=/tmp/pgo-data"
 cargo build --release
 
 # Run typical workload
-./target/release/mcp-remote --help
+./target/release/mcp-connect --help
 # ... more usage patterns ...
 
 # Rebuild with profile data

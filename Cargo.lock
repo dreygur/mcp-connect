@@ -1006,6 +1006,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mcp-connect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "futures",
+ "mcp-client",
+ "mcp-proxy",
+ "mcp-server",
+ "mcp-types",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "mcp-proxy"
 version = "0.1.0"
 dependencies = [
@@ -1023,25 +1042,6 @@ dependencies = [
  "tokio",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "mcp-remote"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "futures",
- "mcp-client",
- "mcp-proxy",
- "mcp-server",
- "mcp-types",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-core",
- "tracing-subscriber",
 ]
 
 [[package]]

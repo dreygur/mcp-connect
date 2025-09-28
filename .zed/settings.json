@@ -10,7 +10,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "mcp-remote",
+        "mcp-connect",
         "https://api.githubcopilot.com/mcp",
         "--header",
         "Authorization: Bearer ${PAT_GITHUB}"

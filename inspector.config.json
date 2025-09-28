@@ -1,11 +1,11 @@
 {
   "mcpServers": {
-    "mcp-remote-test": {
+    "mcp-connect-test": {
       "command": "cargo",
       "args": [
         "run",
         "--bin",
-        "mcp-remote",
+        "mcp-connect",
         "--",
         "http://example.com/mcp",
         "--debug",
@@ -16,7 +16,7 @@
       }
     },
     "github": {
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -26,7 +26,7 @@
       ]
     },
     "cc": {
-      "command": "./target/release/mcp-remote",
+      "command": "./target/release/mcp-connect",
       "args": [
         "proxy",
         "--endpoint",

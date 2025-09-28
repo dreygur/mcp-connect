@@ -1,10 +1,10 @@
 [package]
-name = "mcp-remote"
+name = "mcp-connect"
 version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "mcp-remote"
+name = "mcp-connect"
 path = "src/main.rs"
 
 [dependencies]

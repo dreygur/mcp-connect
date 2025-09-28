@@ -4,7 +4,7 @@ MCP Remote Proxy - Release Binary
 This directory contains a release build of the MCP Remote Proxy.
 
 Binary Information:
-- File: mcp-remote
+- File: mcp-connect
 - Version: 0.1.0
 - Size: 6.2M
 - Platform: Linux x86_64
@@ -16,19 +16,19 @@ The binary requires these system libraries:
 - Standard system libraries (glibc)
 
 Quick Start:
-1. Make sure the binary is executable: chmod +x mcp-remote
-2. Test version: ./mcp-remote --version
-3. Get help: ./mcp-remote --help
+1. Make sure the binary is executable: chmod +x mcp-connect
+2. Test version: ./mcp-connect --version
+3. Get help: ./mcp-connect --help
 
 Usage Examples:
 1. Basic proxy:
-   ./mcp-remote proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+   ./mcp-connect proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
 
 2. Test connection:
-   ./mcp-remote test --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+   ./mcp-connect test --endpoint "https://api.example.com/mcp" --auth-token "your-token"
 
 3. With debug logging:
-   ./mcp-remote proxy --endpoint "https://api.example.com/mcp" --debug
+   ./mcp-connect proxy --endpoint "https://api.example.com/mcp" --debug
 
 Authentication:
 - Use --auth-token for Bearer tokens

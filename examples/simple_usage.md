@@ -8,7 +8,7 @@ Forward requests from local STDIO to a remote HTTP MCP server:
 
 ```bash
 # Start the proxy
-mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
+mcp-connect proxy --endpoint "http://remote-server:8080/mcp" --debug
 
 # The proxy will listen on STDIO and forward to the remote server
 ```
@@ -18,7 +18,7 @@ mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
 Use HTTP as primary, with STDIO and TCP as fallbacks:
 
 ```bash
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "http://remote-server:8080/mcp" \
   --fallbacks "stdio,tcp" \
   --timeout 30 \
@@ -31,7 +31,7 @@ mcp-remote proxy \
 Distribute requests across multiple servers:
 
 ```bash
-mcp-remote load-balance \
+mcp-connect load-balance \
   --endpoints "http://server1:8080/mcp,http://server2:8080/mcp,http://server3:8080/mcp" \
   --transport "http" \
   --timeout 30 \
@@ -43,7 +43,7 @@ mcp-remote load-balance \
 Forward to a subprocess MCP server:
 
 ```bash
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "python my-mcp-server.py" \
   --fallbacks "tcp" \
   --debug
@@ -54,7 +54,7 @@ mcp-remote proxy \
 Forward to a TCP MCP server:
 
 ```bash
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "localhost:9090" \
   --fallbacks "stdio" \
   --debug
@@ -66,13 +66,13 @@ Test connectivity to a remote server:
 
 ```bash
 # Test HTTP connection
-mcp-remote test --endpoint "http://remote-server:8080/mcp" --transport "http"
+mcp-connect test --endpoint "http://remote-server:8080/mcp" --transport "http"
 
 # Test TCP connection
-mcp-remote test --endpoint "localhost:9090" --transport "tcp"
+mcp-connect test --endpoint "localhost:9090" --transport "tcp"
 
 # Test STDIO connection
-mcp-remote test --endpoint "python my-server.py" --transport "stdio"
+mcp-connect test --endpoint "python my-server.py" --transport "stdio"
 ```
 
 ## Integration Examples
@@ -85,7 +85,7 @@ Add to your Claude Desktop configuration:
 {
   "mcpServers": {
     "remote-proxy": {
-      "command": "mcp-remote",
+      "command": "mcp-connect",
       "args": [
         "proxy",
         "--endpoint",
@@ -106,7 +106,7 @@ import json
 
 # Start the proxy
 proxy = subprocess.Popen([
-    "mcp-remote", "proxy",
+    "mcp-connect", "proxy",
     "--endpoint", "http://remote-server:8080/mcp",
     "--debug"
 ], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
@@ -139,18 +139,18 @@ print("Server response:", response)
 FROM rust:1.75 as builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --bin mcp-remote
+RUN cargo build --release --bin mcp-connect
 
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /app/target/release/mcp-remote /usr/local/bin/
-ENTRYPOINT ["mcp-remote"]
+COPY --from=builder /app/target/release/mcp-connect /usr/local/bin/
+ENTRYPOINT ["mcp-connect"]
 ```
 
 ```bash
 # Build and run
-docker build -t mcp-remote .
-docker run -i mcp-remote proxy --endpoint "http://host.docker.internal:8080/mcp"
+docker build -t mcp-connect .
+docker run -i mcp-connect proxy --endpoint "http://host.docker.internal:8080/mcp"
 ```
 
 ## Advanced Configuration
@@ -159,7 +159,7 @@ docker run -i mcp-remote proxy --endpoint "http://host.docker.internal:8080/mcp"
 
 ```bash
 # HTTP with custom timeouts and retries
-mcp-remote proxy \
+mcp-connect proxy \
   --endpoint "http://slow-server:8080/mcp" \
   --timeout 60 \
   --retry-attempts 5 \
@@ -167,7 +167,7 @@ mcp-remote proxy \
   --debug
 
 # Load balancing with health checks
-mcp-remote load-balance \
+mcp-connect load-balance \
   --endpoints "http://server1:8080/mcp,http://server2:8080/mcp" \
   --transport "http" \
   --timeout 10 \
@@ -179,13 +179,13 @@ mcp-remote load-balance \
 
 ```bash
 # Debug mode (writes to stderr)
-mcp-remote proxy --endpoint "..." --debug
+mcp-connect proxy --endpoint "..." --debug
 
 # Custom log level
-mcp-remote proxy --endpoint "..." --log-level "warn"
+mcp-connect proxy --endpoint "..." --log-level "warn"
 
 # Quiet mode
-mcp-remote proxy --endpoint "..." --log-level "error"
+mcp-connect proxy --endpoint "..." --log-level "error"
 ```
 
 ## Error Handling

@@ -47,7 +47,7 @@ impl McpRemoteClient {
         }
 
         let client_info = Implementation {
-            name: "mcp-remote-client".to_string(),
+            name: "mcp-connect-client".to_string(),
             version: "0.1.0".to_string(),
             title: None,
             icons: None,
@@ -73,7 +73,7 @@ impl McpRemoteClient {
 
     pub async fn with_custom_transports(transports: Vec<(TransportType, TransportConfig)>) -> Self {
         let client_info = Implementation {
-            name: "mcp-remote-client".to_string(),
+            name: "mcp-connect-client".to_string(),
             version: "0.1.0".to_string(),
             title: None,
             icons: None,
@@ -120,7 +120,7 @@ impl McpRemoteClient {
         }
 
         let client_info = Implementation {
-            name: "mcp-remote-client".to_string(),
+            name: "mcp-connect-client".to_string(),
             version: "0.1.0".to_string(),
             title: None,
             icons: None,
