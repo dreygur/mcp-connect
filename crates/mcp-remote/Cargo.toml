@@ -1,27 +1,22 @@
 [package]
 name = "mcp-remote"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [[bin]]
 name = "mcp-remote"
 path = "src/main.rs"
 
 [dependencies]
-tokio.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-tracing-subscriber.workspace = true
-clap.workspace = true
-url.workspace = true
-dirs = "5.0"
-
+mcp-types = { path = "../mcp-types" }
+mcp-server = { path = "../mcp-server" }
+mcp-client = { path = "../mcp-client" }
 mcp-proxy = { path = "../mcp-proxy" }
-mcp-oauth = { path = "../mcp-oauth" }
-
-[features]
-default = []
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+futures = { workspace = true }

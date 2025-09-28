@@ -1,280 +1,195 @@
-//! Direct JSON-RPC over STDIO proxy implementation
-//!
-//! This bypasses rmcp's serve_server function which has integration issues,
-//! and implements direct MCP protocol handling over stdin/stdout.
-
 use crate::error::{ProxyError, Result};
-use crate::strategy::TransportStrategy;
-use serde_json::{json, Value};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, AsyncReadExt};
-use tracing::{debug, info, warn, error};
+use crate::proxy::McpProxy;
+use crate::strategy::ProxyStrategy;
+use mcp_types::McpServer;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::{error, info};
 
-/// Direct STDIO JSON-RPC proxy that handles MCP protocol manually
-pub struct StdioProxy {
-    server_url: String,
-    transport_strategy: TransportStrategy,
-    headers: Vec<String>,
+pub struct StdioMcpProxy {
+    proxy: McpProxy,
+    debug_mode: bool,
 }
 
-impl StdioProxy {
-    /// Create a new STDIO proxy
-    pub fn new(server_url: String) -> Self {
+impl StdioMcpProxy {
+    pub fn new(strategy: Arc<dyn ProxyStrategy>, debug_mode: bool) -> Self {
         Self {
-            server_url,
-            transport_strategy: TransportStrategy::default(),
-            headers: Vec::new(),
+            proxy: McpProxy::new(strategy),
+            debug_mode,
         }
     }
 
-    /// Set the transport strategy for connecting to the remote server
-    pub fn with_transport_strategy(mut self, strategy: TransportStrategy) -> Self {
-        self.transport_strategy = strategy;
-        self
-    }
+    pub async fn run(&self) -> Result<()> {
+        info!("Starting STDIO MCP Proxy");
 
-    /// Add custom headers for the remote connection
-    pub fn with_headers(mut self, headers: Vec<String>) -> Self {
-        self.headers = headers;
-        self
-    }
+        // Start the proxy
+        self.proxy.start().await?;
 
-    /// Start the proxy server
-    pub async fn start(self) -> Result<()> {
-        info!("Starting direct STDIO MCP proxy for server: {}", self.server_url);
-
+        // Set up STDIO handling
         let stdin = tokio::io::stdin();
         let mut stdout = tokio::io::stdout();
         let mut reader = BufReader::new(stdin);
         let mut line = String::new();
 
-        info!("STDIO proxy ready - listening for MCP requests");
+        info!("STDIO MCP Proxy ready, listening for messages");
 
         loop {
             line.clear();
-            debug!("Waiting for input...");
 
-            // Try reading line with explicit handling
             match reader.read_line(&mut line).await {
                 Ok(0) => {
-                    info!("End of input - shutting down proxy");
+                    info!("EOF reached, shutting down proxy");
                     break;
                 }
-                Ok(bytes_read) => {
-                    debug!("Read {} bytes from stdin: '{}'", bytes_read, line.trim());
-                }
-                Err(e) => {
-                    return Err(ProxyError::Transport(format!("Failed to read from stdin: {}", e)));
-                }
-            }
-
-            let line_trimmed = line.trim();
-            if line_trimmed.is_empty() {
-                continue;
-            }
-
-            debug!("Received request: {}", line_trimmed);
-
-            // Parse JSON-RPC request
-            match serde_json::from_str::<Value>(line_trimmed) {
-                Ok(request) => {
-                    let response = self.handle_request(request).await;
-                    let response_str = serde_json::to_string(&response)
-                        .map_err(|e| ProxyError::Transport(format!("Failed to serialize response: {}", e)))?;
-
-                    debug!("Sending response: {}", response_str);
-
-                    stdout.write_all(response_str.as_bytes()).await
-                        .map_err(|e| ProxyError::Transport(format!("Failed to write to stdout: {}", e)))?;
-                    stdout.write_all(b"\n").await
-                        .map_err(|e| ProxyError::Transport(format!("Failed to write newline: {}", e)))?;
-                    stdout.flush().await
-                        .map_err(|e| ProxyError::Transport(format!("Failed to flush stdout: {}", e)))?;
-                }
-                Err(e) => {
-                    warn!("Failed to parse JSON-RPC request: {} - Input: {}", e, line_trimmed);
-
-                    // Send JSON-RPC error response
-                    let error_response = json!({
-                        "jsonrpc": "2.0",
-                        "id": null,
-                        "error": {
-                            "code": -32700,
-                            "message": "Parse error",
-                            "data": format!("Invalid JSON: {}", e)
-                        }
-                    });
-
-                    if let Ok(error_str) = serde_json::to_string(&error_response) {
-                        let _ = stdout.write_all(error_str.as_bytes()).await;
-                        let _ = stdout.write_all(b"\n").await;
-                        let _ = stdout.flush().await;
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() {
+                        continue;
                     }
+
+                    self.log_debug(&format!("Received: {}", trimmed));
+
+                    match self.proxy.handle_message(trimmed).await {
+                        Ok(Some(response)) => {
+                            self.log_debug(&format!("Sending: {}", response));
+
+                            if let Err(e) = stdout.write_all(response.as_bytes()).await {
+                                error!("Failed to write response to stdout: {}", e);
+                                break;
+                            }
+                            if let Err(e) = stdout.write_all(b"\n").await {
+                                error!("Failed to write newline to stdout: {}", e);
+                                break;
+                            }
+                            if let Err(e) = stdout.flush().await {
+                                error!("Failed to flush stdout: {}", e);
+                                break;
+                            }
+                        }
+                        Ok(None) => {
+                            self.log_debug("No response needed (notification)");
+                        }
+                        Err(e) => {
+                            error!("Error handling message: {}", e);
+
+                            // Try to send an error response if we can parse the request ID
+                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                                if let Some(id) = parsed.get("id") {
+                                    let error_response = serde_json::json!({
+                                        "jsonrpc": "2.0",
+                                        "id": id,
+                                        "error": {
+                                            "code": -32603,
+                                            "message": format!("Proxy error: {}", e)
+                                        }
+                                    });
+
+                                    let error_str = error_response.to_string();
+                                    let _ = stdout.write_all(error_str.as_bytes()).await;
+                                    let _ = stdout.write_all(b"\n").await;
+                                    let _ = stdout.flush().await;
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to read from stdin: {}", e);
+                    break;
                 }
             }
         }
 
-        info!("STDIO proxy stopped");
+        // Shutdown the proxy
+        self.proxy.shutdown().await?;
+        info!("STDIO MCP Proxy shut down");
         Ok(())
     }
 
-    /// Handle a parsed JSON-RPC request
-    async fn handle_request(&self, request: Value) -> Value {
-        let method = request.get("method").and_then(|m| m.as_str());
-        let id = request.get("id");
-        let params = request.get("params");
+    fn log_debug(&self, message: &str) {
+        if self.debug_mode {
+            // In debug mode, write to stderr to avoid interfering with stdout protocol
+            eprintln!("DEBUG: {}", message);
+        }
+    }
+}
 
-        match method {
-            Some("initialize") => self.handle_initialize(id, params).await,
-            Some("ping") => self.handle_ping(id).await,
-            Some("tools/list") => self.handle_list_tools(id, params).await,
-            Some("tools/call") => self.handle_call_tool(id, params).await,
-            Some("resources/list") => self.handle_list_resources(id, params).await,
-            Some("prompts/list") => self.handle_list_prompts(id, params).await,
-            Some("initialized") => {
-                // Notification - no response needed
-                info!("Client initialization complete");
-                return json!(null);
-            }
-            Some(unknown_method) => {
-                warn!("Unknown method: {}", unknown_method);
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32601,
-                        "message": "Method not found",
-                        "data": format!("Unknown method: {}", unknown_method)
-                    }
-                })
-            }
-            None => {
-                warn!("Request missing method field");
-                json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "error": {
-                        "code": -32600,
-                        "message": "Invalid Request",
-                        "data": "Missing method field"
-                    }
-                })
-            }
+/// A combined server-proxy that acts as an MCP server but forwards requests to remote servers
+pub struct CombinedStdioProxy {
+    stdio_proxy: StdioMcpProxy,
+}
+
+impl CombinedStdioProxy {
+    pub fn new(strategy: Arc<dyn ProxyStrategy>, debug_mode: bool) -> Self {
+        Self {
+            stdio_proxy: StdioMcpProxy::new(strategy, debug_mode),
         }
     }
 
-    /// Handle initialize request
-    async fn handle_initialize(&self, id: Option<&Value>, _params: Option<&Value>) -> Value {
-        info!("Handling initialize request - TODO: forward to remote server {}", self.server_url);
+    pub async fn run_as_server(&self) -> Result<()> {
+        self.stdio_proxy.run().await
+    }
+}
 
-        // For now, return proxy server info
-        // TODO: Forward to actual remote server and return its capabilities
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "tools": {
-                        "listChanged": false
-                    },
-                    "resources": {
-                        "subscribe": false,
-                        "listChanged": false
-                    },
-                    "prompts": {
-                        "listChanged": false
-                    }
-                },
-                "serverInfo": {
-                    "name": "mcp-remote-proxy",
-                    "version": "0.1.0",
-                    "title": "MCP Remote Proxy",
-                    "description": format!("Proxying to: {}", self.server_url)
-                },
-                "instructions": format!("Connected to remote server: {}", self.server_url)
-            }
-        })
+#[async_trait::async_trait]
+impl McpServer for CombinedStdioProxy {
+    async fn start(&mut self) -> mcp_types::Result<()> {
+        self.stdio_proxy.proxy.start().await
+            .map_err(|e| mcp_types::McpError::Protocol(e.to_string()))
     }
 
-    /// Handle ping request
-    async fn handle_ping(&self, id: Option<&Value>) -> Value {
-        debug!("Handling ping request");
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {}
-        })
+    async fn handle_message(&mut self, message: &str) -> mcp_types::Result<Option<String>> {
+        self.stdio_proxy.proxy.handle_message(message).await
+            .map_err(|e| mcp_types::McpError::Protocol(e.to_string()))
     }
 
-    /// Handle tools/list request
-    async fn handle_list_tools(&self, id: Option<&Value>, _params: Option<&Value>) -> Value {
-        info!("Handling tools/list request - TODO: forward to remote server {}", self.server_url);
+    async fn shutdown(&mut self) -> mcp_types::Result<()> {
+        self.stdio_proxy.proxy.shutdown().await
+            .map_err(|e| mcp_types::McpError::Protocol(e.to_string()))
+    }
+}
 
-        // TODO: Forward to remote server and return its tools
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "tools": [],
-                "_meta": {
-                    "proxied_from": self.server_url.clone()
-                }
-            }
-        })
+/// Builder for creating STDIO proxies with different configurations
+pub struct StdioProxyBuilder {
+    strategy: Option<Arc<dyn ProxyStrategy>>,
+    debug_mode: bool,
+}
+
+impl StdioProxyBuilder {
+    pub fn new() -> Self {
+        Self {
+            strategy: None,
+            debug_mode: false,
+        }
     }
 
-    /// Handle tools/call request
-    async fn handle_call_tool(&self, id: Option<&Value>, params: Option<&Value>) -> Value {
-        let tool_name = params
-            .and_then(|p| p.get("name"))
-            .and_then(|n| n.as_str())
-            .unwrap_or("unknown");
-
-        info!("Handling tools/call request for '{}' - TODO: forward to remote server {}", tool_name, self.server_url);
-
-        // TODO: Forward to remote server
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "error": {
-                "code": -32603,
-                "message": "Internal error",
-                "data": "Remote tool execution not yet implemented"
-            }
-        })
+    pub fn with_strategy(mut self, strategy: Arc<dyn ProxyStrategy>) -> Self {
+        self.strategy = Some(strategy);
+        self
     }
 
-    /// Handle resources/list request
-    async fn handle_list_resources(&self, id: Option<&Value>, _params: Option<&Value>) -> Value {
-        info!("Handling resources/list request - TODO: forward to remote server {}", self.server_url);
-
-        // TODO: Forward to remote server
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "resources": [],
-                "_meta": {
-                    "proxied_from": self.server_url.clone()
-                }
-            }
-        })
+    pub fn with_debug_mode(mut self, debug: bool) -> Self {
+        self.debug_mode = debug;
+        self
     }
 
-    /// Handle prompts/list request
-    async fn handle_list_prompts(&self, id: Option<&Value>, _params: Option<&Value>) -> Value {
-        info!("Handling prompts/list request - TODO: forward to remote server {}", self.server_url);
+    pub fn build(self) -> Result<StdioMcpProxy> {
+        let strategy = self.strategy
+            .ok_or_else(|| ProxyError::Strategy("No strategy provided".to_string()))?;
 
-        // TODO: Forward to remote server
-        json!({
-            "jsonrpc": "2.0",
-            "id": id,
-            "result": {
-                "prompts": [],
-                "_meta": {
-                    "proxied_from": self.server_url.clone()
-                }
-            }
-        })
+        Ok(StdioMcpProxy::new(strategy, self.debug_mode))
+    }
+
+    pub fn build_combined(self) -> Result<CombinedStdioProxy> {
+        let strategy = self.strategy
+            .ok_or_else(|| ProxyError::Strategy("No strategy provided".to_string()))?;
+
+        Ok(CombinedStdioProxy::new(strategy, self.debug_mode))
+    }
+}
+
+impl Default for StdioProxyBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }

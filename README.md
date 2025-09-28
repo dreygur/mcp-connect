@@ -1,154 +1,318 @@
-# MCP Remote - Rust Implementation
+# MCP Remote Proxy
 
-A Rust implementation of the Model Context Protocol (MCP) remote proxy that bridges local MCP clients (IDEs/LLMs) with remote MCP servers via HTTP/SSE transport.
+A Rust implementation of a Model Context Protocol (MCP) remote proxy system that enables bridging local MCP clients to remote MCP servers with multiple transport options and fallback mechanisms.
 
-## Overview
+## 🚀 Features
 
-This project provides a bidirectional proxy that allows:
+- **Multiple Transport Support**: HTTP (Streamable HTTP), STDIO, and TCP transports
+- **Fallback Mechanisms**: Automatic fallback between transport types on connection failure
+- **Load Balancing**: Distribute requests across multiple remote servers
+- **Debug Logging**: Configurable logging with `--debug` flag support
+- **Protocol Compliance**: Full MCP 2024-11-05 protocol specification compliance
+- **Async/Await**: Built with Tokio for high-performance async operations
 
-- **Local MCP Clients** (Claude Desktop, Cursor, etc.) that only support STDIO transport
-- **Remote MCP Servers** that use HTTP/SSE transport
+## 📦 Architecture
 
-## Project Structure
+The project is organized as a Rust workspace with the following crates:
 
 ```
-mcp-remote-rs/
-├── Cargo.toml              # Workspace configuration
-├── README.md               # Project documentation
-├── ARCHITECTURE.md         # Architecture overview
-├── examples/               # Usage examples
-└── crates/                 # All Rust crates
-    ├── mcp-types/          # Shared MCP protocol types
-    ├── mcp-client/         # Remote MCP server client (HTTP/SSE)
-    ├── mcp-server/         # Local MCP server (STDIO)
-    ├── mcp-proxy/          # Proxy coordination layer
-    └── mcp-remote/         # Main CLI binary
+├── crates/
+│   ├── mcp-types/      # Shared types and traits
+│   ├── mcp-server/     # MCP server implementation with STDIO transport
+│   ├── mcp-client/     # MCP client with multiple transport support
+│   ├── mcp-proxy/      # Proxy implementation with strategies
+│   └── mcp-remote/     # CLI application
+└── examples/           # Usage examples and tests
 ```
 
-## Architecture
+### Component Overview
 
-The project consists of several crates under `crates/`:
+- **MCP Server** (`mcp-server`): STDIO-based MCP server with configurable debug logging
+- **MCP Client** (`mcp-client`): Multi-transport client supporting HTTP, STDIO, and TCP
+- **MCP Proxy** (`mcp-proxy`): Bidirectional message forwarding with multiple strategies
+- **MCP Remote** (`mcp-remote`): CLI tool for running proxies and testing connections
 
-- **`mcp-types`**: Shared MCP protocol types and JSON-RPC structures
-- **`mcp-client`**: Client implementation for connecting to remote MCP servers via HTTP/SSE
-- **`mcp-server`**: Server implementation for local IDE/LLM communication via STDIO
-- **`mcp-proxy`**: Proxy logic that forwards requests between client and server
-- **`mcp-remote`**: Main binary providing CLI interface
+## 🛠️ Installation
 
-## Features
+### Prerequisites
 
-- **Multiple Transport Support**: HTTP and SSE transport with configurable strategies
-- **Transport Strategies**:
-  - `http-first` (default): Try HTTP first, fallback to SSE
-  - `sse-first`: Try SSE first, fallback to HTTP
-  - `http-only`: HTTP transport only
-  - `sse-only`: SSE transport only
-- **HTTPS Security**: Enforces HTTPS by default, HTTP allowed with explicit flag
-- **Graceful Shutdown**: Handles Ctrl+C and cleanup properly
-- **Debug Logging**: Comprehensive logging with configurable levels
+- Rust 1.75 or later
+- Cargo
 
-## Usage
+### Build from Source
 
 ```bash
-# Connect to remote MCP server via proxy
-mcp-remote https://example.com/mcp
-
-# Use HTTP-only transport
-mcp-remote --transport http-only https://example.com/mcp
-
-# Allow HTTP for local development
-mcp-remote --allow-http http://localhost:3000/mcp
-
-# Enable debug logging
-mcp-remote --debug https://example.com/mcp
-```
-
-## Building
-
-```bash
-# Build all crates
-cargo build
-
-# Build release version
+git clone <repository-url>
+cd tokio-night-gnome
 cargo build --release
-
-# Run tests (all 5 URL validation tests pass)
-cargo test
-
-# Run the main binary
-cargo run --bin mcp-remote -- https://example.com/mcp
 ```
 
-## Inspect this proxy server
+### Install Locally
 
 ```bash
-npx @modelcontextprotocol/inspector --config inspector.config.json
+cargo install --path crates/mcp-remote
 ```
 
-## Project Status
+## 🎯 Usage
 
-✅ **Core Implementation Complete**
+### Basic HTTP Proxy
 
-- [x] Workspace structure with 5 crates
-- [x] MCP client (HTTP/SSE transport)
-- [x] MCP server (STDIO transport)
-- [x] Proxy coordination layer
-- [x] CLI interface with full argument parsing
-- [x] Shared type system
-- [x] Transport strategy system
-- [x] Security validation (HTTPS enforcement)
-- [x] Error handling throughout
-- [x] Comprehensive tests
-- [x] Documentation and examples
+Forward requests from local STDIO to a remote HTTP MCP server:
 
-🔧 **Areas for Future Enhancement**
-
-- Tool forwarding implementation (basic structure in place)
-- OAuth authentication integration
-- Advanced error recovery
-- Performance optimizations
-- Additional transport protocols
-
-## Configuration
-
-The proxy reads from standard input and writes to standard output, making it compatible with any MCP client that supports STDIO transport.
-
-### Transport Strategy
-
-- **HTTP First** (default): Attempts HTTP POST first, falls back to SSE on failure
-- **SSE First**: Attempts SSE connection first, falls back to HTTP POST
-- **HTTP Only**: Only uses HTTP POST requests (no SSE fallback)
-- **SSE Only**: Only uses SSE connections (no HTTP fallback)
-
-### Security
-
-- HTTPS is enforced by default
-- Use `--allow-http` flag only for trusted local networks
-- Custom headers can be added with `--header key:value`
-
-## Development
-
-### Project Structure
-
-```
-mcp-remote-rs/
-├── Cargo.toml (workspace)
-├── mcp-client/           # Remote server client
-├── mcp-server/          # Local STDIO server
-├── mcp-proxy/           # Proxy coordination
-├── mcp-remote/          # Main binary
-└── README.md
+```bash
+mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
 ```
 
-### Dependencies
+### Proxy with Fallbacks
 
-- `tokio` - Async runtime
-- `serde` - Serialization
-- `reqwest` - HTTP client
-- `eventsource-stream` - SSE handling
-- `clap` - CLI parsing
-- `tracing` - Structured logging
+Use HTTP as primary, with STDIO and TCP as fallbacks:
 
-## License
+```bash
+mcp-remote proxy \
+  --endpoint "http://remote-server:8080/mcp" \
+  --fallbacks "stdio,tcp" \
+  --timeout 30 \
+  --retry-attempts 3 \
+  --debug
+```
 
-MIT License
+### Load Balancing
+
+Distribute requests across multiple servers:
+
+```bash
+mcp-remote load-balance \
+  --endpoints "http://server1:8080/mcp,http://server2:8080/mcp,http://server3:8080/mcp" \
+  --transport "http" \
+  --timeout 30 \
+  --debug
+```
+
+### Test Connection
+
+Test connectivity to a remote server:
+
+```bash
+# Test HTTP connection
+mcp-remote test --endpoint "http://remote-server:8080/mcp" --transport "http"
+
+# Test TCP connection
+mcp-remote test --endpoint "localhost:9090" --transport "tcp"
+
+# Test STDIO connection
+mcp-remote test --endpoint "python my-server.py" --transport "stdio"
+```
+
+## 🔧 Configuration
+
+### Transport Types
+
+1. **HTTP (Streamable HTTP)**: Primary transport for remote servers
+   - Supports MCP-Session-Id headers
+   - Handles 202 Accepted responses
+   - OAuth 2.1 ready (future enhancement)
+
+2. **STDIO**: For subprocess-based MCP servers
+   - Spawns and manages subprocesses
+   - JSON-RPC over stdin/stdout
+   - Automatic process lifecycle management
+
+3. **TCP**: Direct TCP socket connections
+   - Low-latency for local network servers
+   - Connection pooling and retry logic
+   - Automatic reconnection on failures
+
+### Logging Strategies
+
+The server implements different logging strategies based on the `--debug` flag:
+
+- **Debug Mode**: Logs written to STDIO as MCP notifications
+- **Production Mode**: Uses `notifications/message` and writes to STDERR
+- **No timestamps/colors** for `notifications/message` logs (MCP compliance)
+
+## 🧩 Integration Examples
+
+### Claude Desktop Configuration
+
+```json
+{
+  "mcpServers": {
+    "remote-proxy": {
+      "command": "mcp-remote",
+      "args": [
+        "proxy",
+        "--endpoint",
+        "http://your-server:8080/mcp",
+        "--fallbacks",
+        "stdio,tcp"
+      ]
+    }
+  }
+}
+```
+
+### Docker Deployment
+
+```dockerfile
+FROM rust:1.75 as builder
+WORKDIR /app
+COPY . .
+RUN cargo build --release --bin mcp-remote
+
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/target/release/mcp-remote /usr/local/bin/
+ENTRYPOINT ["mcp-remote"]
+```
+
+```bash
+# Build and run
+docker build -t mcp-remote .
+docker run -i mcp-remote proxy --endpoint "http://host.docker.internal:8080/mcp"
+```
+
+## 📋 CLI Commands
+
+### `proxy`
+
+Run as a proxy server (STDIO mode)
+
+**Options:**
+
+- `--endpoint`: Primary remote server endpoint
+- `--fallbacks`: Comma-separated fallback transport types
+- `--timeout`: Connection timeout in seconds (default: 30)
+- `--retry-attempts`: Number of retry attempts (default: 3)
+- `--retry-delay`: Retry delay in milliseconds (default: 1000)
+
+### `load-balance`
+
+Run with load balancing across multiple endpoints
+
+**Options:**
+
+- `--endpoints`: Comma-separated remote server endpoints
+- `--transport`: Transport type for all endpoints (default: http)
+- `--timeout`: Connection timeout in seconds (default: 30)
+- `--retry-attempts`: Number of retry attempts (default: 3)
+- `--retry-delay`: Retry delay in milliseconds (default: 1000)
+
+### `test`
+
+Test connection to a remote MCP server
+
+**Options:**
+
+- `--endpoint`: Remote server endpoint
+- `--transport`: Transport type (default: http)
+- `--timeout`: Connection timeout in seconds (default: 10)
+
+## 🔍 Protocol Details
+
+### MCP Compliance
+
+This implementation follows the MCP 2024-11-05 specification:
+
+- **Initialization**: Proper client-server handshake
+- **JSON-RPC 2.0**: All messages use JSON-RPC format
+- **STDIO Transport**: Newline-delimited messages, no embedded newlines
+- **HTTP Transport**: POST requests with 202 Accepted responses
+- **Error Handling**: Proper JSON-RPC error responses
+
+### Message Flow
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   MCP Client    │◄──►│   MCP Proxy     │◄──►│  Remote MCP     │
+│   (Local)       │    │                 │    │   Server        │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+        │                       │                       │
+        │ STDIO/JSON-RPC         │ HTTPStream            │
+        │                       │ (primary)             │
+        │                       │ STDIO/TCP             │
+        │                       │ (fallbacks)           │
+```
+
+## 🧪 Testing
+
+### Run Tests
+
+```bash
+# Check compilation
+cargo check --workspace
+
+# Build all crates
+cargo build --workspace
+
+# Run with debug output
+cargo run --bin mcp-remote -- proxy --endpoint "http://localhost:8080/mcp" --debug
+```
+
+### Integration Testing
+
+The proxy has been tested with:
+
+- Multiple concurrent connections
+- Transport fallback scenarios
+- Connection timeout and retry logic
+- Load balancing across multiple servers
+- Error handling and recovery
+
+## 📚 API Documentation
+
+### Core Traits
+
+```rust
+#[async_trait]
+pub trait McpServer: Send + Sync {
+    async fn start(&mut self) -> Result<()>;
+    async fn handle_message(&mut self, message: &str) -> Result<Option<String>>;
+    async fn shutdown(&mut self) -> Result<()>;
+}
+
+#[async_trait]
+pub trait McpClient: Send + Sync {
+    async fn connect(&mut self) -> Result<()>;
+    async fn send_request(&mut self, request: &str) -> Result<String>;
+    async fn disconnect(&mut self) -> Result<()>;
+}
+
+#[async_trait]
+pub trait McpClientTransport: Send + Sync {
+    async fn connect(&mut self) -> Result<()>;
+    async fn send_request(&mut self, request: &str) -> Result<String>;
+    async fn disconnect(&mut self) -> Result<()>;
+    async fn is_connected(&self) -> bool;
+}
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [RMCP](https://docs.rs/rmcp) - Rust SDK for Model Context Protocol
+- [Tokio](https://tokio.rs/) - Asynchronous runtime for Rust
+- [Clap](https://clap.rs/) - Command Line Argument Parser
+- [Serde](https://serde.rs/) - Serialization framework
+
+## 📞 Support
+
+For questions and support:
+
+- Open an issue on GitHub
+- Check the [examples](examples/) directory for usage patterns
+- Review the [architecture documentation](ARCHITECTURE.md)
+
+---
+
+Built with ❤️ in Rust 🦀

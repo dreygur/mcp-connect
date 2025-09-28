@@ -1,0 +1,13 @@
+[
+  {
+    "label": "Build & Debug native binary",
+    "build": {
+      "command": "cargo",
+      "args": ["build"]
+    },
+    "program": "$ZED_WORKTREE_ROOT/target/debug/binary", // Replace "binary" with your executable name
+    "sourceLanguages": ["rust"], // Required for CodeLLDB with Rust
+    "request": "launch",
+    "adapter": "CodeLLDB" // Or "GDB" if you prefer
+  }
+]

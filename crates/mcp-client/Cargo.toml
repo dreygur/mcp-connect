@@ -1,34 +1,18 @@
 [package]
 name = "mcp-client"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-# Official rmcp SDK with client and transport features
-rmcp.workspace = true
-
-# Additional dependencies not provided by rmcp
-anyhow.workspace = true
-tracing.workspace = true
-async-trait.workspace = true
-url.workspace = true
-
-# Re-export core dependencies that rmcp uses
-serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-reqwest.workspace = true
-futures.workspace = true
-
-# Internal dependencies
 mcp-types = { path = "../mcp-types" }
-
-[dev-dependencies]
-tokio-test = "0.4"
-
-[features]
-default = ["http", "sse"]
-http = []
-sse = []
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+reqwest = { workspace = true }
+futures = { workspace = true }
+rmcp = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+base64 = "0.22"

@@ -14,6 +14,27 @@
       "env": {
         "RUST_LOG": "debug"
       }
+    },
+    "github": {
+      "command": "./target/release/mcp-remote",
+      "args": [
+        "proxy",
+        "--endpoint",
+        "https://api.githubcopilot.com/mcp",
+        "--headers",
+        "\"Authorization: Bearer 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\""
+      ],
+      "env": {}
+    },
+    "cc": {
+      "command": "./target/release/mcp-remote",
+      "args": [
+        "proxy",
+        "--endpoint",
+        "https://mcp.context7.com/mcp",
+        "--headers",
+        "\"Authorization: Bearer ctx7sk-ef32cd94-02c5-4bf4-8560-7100828db6ff\""
+      ]
     }
   }
 }

@@ -1,19 +1,17 @@
 [package]
 name = "mcp-proxy"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-rmcp.workspace = true
-anyhow.workspace = true
-tracing.workspace = true
-futures.workspace = true
-tokio.workspace = true
-serde_json.workspace = true
-
 mcp-types = { path = "../mcp-types" }
-
-[features]
-default = []
+mcp-server = { path = "../mcp-server" }
+mcp-client = { path = "../mcp-client" }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }

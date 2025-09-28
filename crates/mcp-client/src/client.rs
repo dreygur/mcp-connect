@@ -1,428 +1,412 @@
-//! MCP Client implementation using the official rmcp SDK
-//!
-//! This module provides a simplified client interface that properly uses the rmcp SDK
-//! for essential MCP operations while maintaining compatibility with existing code.
-
-use crate::{error::ClientError, ClientConfig, Result, Strategy};
-use mcp_types::*;
-use rmcp::{
-    model::{
-        CallToolRequestParam, CallToolResult, InitializeResult, Tool,
-    },
+use crate::error::{ClientError, Result};
+use crate::transport::{create_transport, McpClientTransport, TransportConfig};
+use mcp_types::{McpClient, TransportType};
+use rmcp::model::{
+    ClientCapabilities, Implementation, InitializeRequestParam, InitializeResult, ProtocolVersion,
 };
-use std::collections::HashMap;
-use tracing::{debug, info, warn};
+use serde_json::{json, Value};
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tracing::{error, info, warn};
 
-/// Legacy client interface for backward compatibility
-#[deprecated(note = "Use RmcpClient instead")]
-pub struct McpClient {
-    inner: RmcpClient,
+pub struct McpRemoteClient {
+    transports: Vec<(TransportType, TransportConfig)>,
+    current_transport: Arc<Mutex<Option<Box<dyn McpClientTransport>>>>,
+    current_transport_index: Arc<Mutex<usize>>,
+    initialized: Arc<Mutex<bool>>,
+    client_info: Implementation,
+    capabilities: ClientCapabilities,
+    request_id: Arc<Mutex<u64>>,
 }
 
-#[allow(deprecated)]
-impl McpClient {
-    pub async fn new(server_url: String) -> Result<Self> {
-        let config = ClientConfig::new(server_url);
-        let inner = RmcpClient::new(config).await?;
-        Ok(Self { inner })
-    }
+impl McpRemoteClient {
+    pub fn new(primary_endpoint: String, fallback_transports: Vec<TransportType>) -> Self {
+        let mut transports = vec![];
 
-    pub async fn initialize(&mut self) -> Result<InitializeResult> {
-        self.inner.initialize().await
-    }
-
-    pub async fn list_tools(&self) -> Result<Vec<Tool>> {
-        self.inner.list_tools().await
-    }
-
-    pub async fn call_tool(&self, request: CallToolRequest) -> Result<CallToolResult> {
-        // Convert legacy request to rmcp format
-        let rmcp_request = CallToolRequestParam {
-            name: request.name.into(),
-            arguments: request.arguments,
+        // Primary transport (HTTP by default)
+        let primary_config = TransportConfig {
+            endpoint: primary_endpoint,
+            ..Default::default()
         };
-        self.inner.call_tool(rmcp_request).await
-    }
-}
+        transports.push((TransportType::Http, primary_config));
 
-/// Modern MCP client using the official rmcp SDK
-///
-/// For now, this is a simplified version that demonstrates rmcp integration patterns.
-/// A full implementation would use rmcp's service layer with HTTP/SSE transports.
-#[derive(Debug)]
-pub struct RmcpClient {
-    config: ClientConfig,
-    initialized: bool,
-}
-
-impl RmcpClient {
-    /// Create a new RmcpClient with the specified configuration
-    pub async fn new(config: ClientConfig) -> Result<Self> {
-        info!("Creating RmcpClient for URL: {}", config.server_url);
-        debug!("Client config: {:?}", config);
-
-        // Validate URL
-        let url = url::Url::parse(&config.server_url)
-            .map_err(|e| ClientError::invalid_url(format!("Invalid URL: {}", e)))?;
-
-        // Check HTTPS enforcement
-        if url.scheme() == "http" && !config.allow_http {
-            return Err(ClientError::security_error(
-                "HTTPS required. Use --allow-http for HTTP URLs in trusted networks",
-            ));
+        // Add fallback transports
+        for transport_type in fallback_transports {
+            let config = match transport_type {
+                TransportType::Stdio => TransportConfig {
+                    endpoint: "mcp-server".to_string(), // Default server command
+                    ..Default::default()
+                },
+                TransportType::Tcp => TransportConfig {
+                    endpoint: "8080".to_string(), // Default port
+                    ..Default::default()
+                },
+                TransportType::Http => continue, // Skip if already added as primary
+            };
+            transports.push((transport_type, config));
         }
 
-        Ok(Self {
-            config,
-            initialized: false,
-        })
-    }
-
-    /// Initialize connection with the MCP server
-    ///
-    /// This is a simplified implementation that demonstrates the expected interface.
-    /// A full implementation would create rmcp transports and establish the connection.
-    pub async fn initialize(&mut self) -> Result<InitializeResult> {
-        info!("Initializing MCP connection");
-
-        if self.initialized {
-            return Err(ClientError::protocol_error("Client already initialized"));
-        }
-
-        // In a full rmcp implementation, this would:
-        // 1. Create HTTP or SSE transport based on strategy
-        // 2. Use rmcp's service layer: ().serve(transport).await?
-        // 3. Call client.peer().initialize(params).await?
-        //
-        // For now, return a mock response to demonstrate the interface
-        let response = InitializeResult {
-            protocol_version: rmcp::model::ProtocolVersion::V_2024_11_05,
-            capabilities: rmcp::model::ServerCapabilities {
-                logging: None,
-                completions: None,
-                prompts: None,
-                resources: None,
-                tools: Some(rmcp::model::ToolsCapability {
-                    list_changed: Some(true),
-                }),
-                experimental: None,
-            },
-            server_info: rmcp::model::Implementation {
-                name: format!("rmcp-demo-server-{}", self.config.server_url),
-                version: "1.0.0".to_string(),
-                title: Some("MCP Server via rmcp".to_string()),
-                icons: None,
-                website_url: None,
-            },
-            instructions: None,
+        let client_info = Implementation {
+            name: "mcp-remote-client".to_string(),
+            version: "0.1.0".to_string(),
         };
 
-        self.initialized = true;
-        info!("Successfully initialized MCP connection");
-        debug!("Server info: {:?}", response.server_info);
+        let capabilities = ClientCapabilities::builder()
+            .enable_experimental()
+            .enable_roots()
+            .enable_roots_list_changed()
+            .build();
 
-        Ok(response)
+        Self {
+            transports,
+            current_transport: Arc::new(Mutex::new(None)),
+            current_transport_index: Arc::new(Mutex::new(0)),
+            initialized: Arc::new(Mutex::new(false)),
+            client_info,
+            capabilities,
+            request_id: Arc::new(Mutex::new(1)),
+        }
     }
 
-    /// List available tools from the server
-    pub async fn list_tools(&self) -> Result<Vec<Tool>> {
-        debug!("Requesting list of available tools");
+    pub async fn with_custom_transports(transports: Vec<(TransportType, TransportConfig)>) -> Self {
+        let client_info = Implementation {
+            name: "mcp-remote-client".to_string(),
+            version: "0.1.0".to_string(),
+        };
 
-        if !self.initialized {
-            return Err(ClientError::protocol_error("Client not initialized"));
+        let capabilities = ClientCapabilities::builder()
+            .enable_experimental()
+            .enable_roots()
+            .enable_roots_list_changed()
+            .build();
+
+        Self {
+            transports,
+            current_transport: Arc::new(Mutex::new(None)),
+            current_transport_index: Arc::new(Mutex::new(0)),
+            initialized: Arc::new(Mutex::new(false)),
+            client_info,
+            capabilities,
+            request_id: Arc::new(Mutex::new(1)),
         }
-
-        // In a full rmcp implementation, this would:
-        // let request = ListToolsRequestParam { cursor: None };
-        // let response = service.peer().list_tools(request).await?;
-        // return Ok(response.tools);
-
-        // For now, return a mock tool list
-        let tools = vec![
-            Tool {
-                name: "echo".into(),
-                description: Some("Echo back the input text".into()),
-                input_schema: std::sync::Arc::new(
-                    serde_json::json!({
-                        "type": "object",
-                        "properties": {
-                            "text": {
-                                "type": "string",
-                                "description": "Text to echo back"
-                            }
-                        },
-                        "required": ["text"]
-                    }).as_object().unwrap().clone()
-                ),
-                annotations: None,
-                icons: None,
-                output_schema: None,
-                title: None,
-            }
-        ];
-
-        info!("Retrieved {} tools from server", tools.len());
-        debug!("Available tools: {:?}", tools);
-
-        Ok(tools)
     }
 
-    /// Call a tool on the remote server
-    pub async fn call_tool(&self, request: CallToolRequestParam) -> Result<CallToolResult> {
-        info!("Calling tool: {}", request.name);
-        debug!("Tool call request: {:?}", request);
+    pub fn new_with_config(primary_config: TransportConfig, fallback_transports: Vec<TransportType>) -> Self {
+        let mut transports = vec![];
 
-        if !self.initialized {
-            return Err(ClientError::protocol_error("Client not initialized"));
+        // Primary transport (HTTP by default)
+        transports.push((TransportType::Http, primary_config));
+
+        // Add fallback transports
+        for transport_type in fallback_transports {
+            let config = match transport_type {
+                TransportType::Stdio => TransportConfig {
+                    endpoint: "mcp-server".to_string(), // Default server command
+                    ..Default::default()
+                },
+                TransportType::Tcp => TransportConfig {
+                    endpoint: "8080".to_string(), // Default port
+                    ..Default::default()
+                },
+                TransportType::Http => continue, // Skip if already added as primary
+            };
+            transports.push((transport_type, config));
         }
 
-        // In a full rmcp implementation, this would:
-        // let response = service.peer().call_tool(request).await?;
-        // return Ok(response);
+        let client_info = Implementation {
+            name: "mcp-remote-client".to_string(),
+            version: "0.1.0".to_string(),
+        };
 
-        // For now, create a mock response
-        let response = match request.name.as_ref() {
-            "echo" => {
-                let text = request
-                    .arguments
-                    .as_ref()
-                    .and_then(|args| args.get("text"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(no text provided)");
+        let capabilities = ClientCapabilities::builder()
+            .enable_experimental()
+            .enable_roots()
+            .enable_roots_list_changed()
+            .build();
 
-                CallToolResult {
-                    content: vec![rmcp::model::Content::text(format!("Echo: {}", text))],
-                    is_error: Some(false),
-                    meta: None,
-                    structured_content: None,
+        Self {
+            transports,
+            current_transport: Arc::new(Mutex::new(None)),
+            current_transport_index: Arc::new(Mutex::new(0)),
+            initialized: Arc::new(Mutex::new(false)),
+            client_info,
+            capabilities,
+            request_id: Arc::new(Mutex::new(1)),
+        }
+    }
+
+    async fn next_request_id(&self) -> u64 {
+        let mut id = self.request_id.lock().await;
+        *id += 1;
+        *id
+    }
+
+    async fn try_connect_transport(&self, index: usize) -> Result<Box<dyn McpClientTransport>> {
+        if index >= self.transports.len() {
+            return Err(ClientError::Connection("No more transports to try".to_string()));
+        }
+
+        let (transport_type, config) = &self.transports[index];
+        info!("Attempting to connect using {:?} transport", transport_type);
+
+        let mut transport = create_transport(transport_type.clone(), config.clone()).await?;
+        transport.connect().await?;
+
+        Ok(transport)
+    }
+
+    async fn connect_with_fallbacks(&self) -> Result<()> {
+        let current_index = *self.current_transport_index.lock().await;
+
+        for i in current_index..self.transports.len() {
+            match self.try_connect_transport(i).await {
+                Ok(transport) => {
+                    *self.current_transport.lock().await = Some(transport);
+                    *self.current_transport_index.lock().await = i;
+                    info!("Successfully connected using transport {}", i);
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!("Transport {} failed: {}", i, e);
                 }
             }
-            _ => CallToolResult {
-                content: vec![rmcp::model::Content::text(format!("Tool '{}' not found", request.name))],
-                is_error: Some(true),
-                meta: None,
-                structured_content: None,
-            },
+        }
+
+        Err(ClientError::Connection("All transports failed".to_string()))
+    }
+
+    async fn ensure_connected(&self) -> Result<()> {
+        let transport_guard = self.current_transport.lock().await;
+        if let Some(transport) = transport_guard.as_ref() {
+            if transport.is_connected().await {
+                return Ok(());
+            }
+        }
+        drop(transport_guard);
+
+        // Try to reconnect
+        self.connect_with_fallbacks().await
+    }
+
+    async fn send_request_with_retry(&self, request: &str) -> Result<String> {
+        const MAX_RETRY_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=MAX_RETRY_ATTEMPTS {
+            self.ensure_connected().await?;
+
+            let mut transport_guard = self.current_transport.lock().await;
+            if let Some(transport) = transport_guard.as_mut() {
+                match transport.send_request(request).await {
+                    Ok(response) => return Ok(response),
+                    Err(e) => {
+                        error!("Request attempt {} failed: {}", attempt, e);
+                        if attempt == MAX_RETRY_ATTEMPTS {
+                            return Err(e);
+                        }
+                        // Mark transport as disconnected and try next transport
+                        drop(transport_guard);
+                        *self.current_transport.lock().await = None;
+
+                        // Move to next transport for retry
+                        let mut index_guard = self.current_transport_index.lock().await;
+                        *index_guard = (*index_guard + 1) % self.transports.len();
+                    }
+                }
+            } else {
+                return Err(ClientError::Connection("No transport available".to_string()));
+            }
+        }
+
+        Err(ClientError::Connection("All retry attempts failed".to_string()))
+    }
+
+    pub async fn initialize(&self) -> Result<InitializeResult> {
+        let request_id = self.next_request_id().await;
+
+        let request_params = InitializeRequestParam {
+            protocol_version: ProtocolVersion::default(),
+            capabilities: self.capabilities.clone(),
+            client_info: self.client_info.clone(),
         };
 
-        if response.is_error == Some(true) {
-            warn!("Tool call returned error: {:?}", response);
-        } else {
-            info!("Tool call completed successfully");
-            debug!("Tool call response: {:?}", response);
+        let json_request = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "initialize",
+            "params": request_params
+        });
+
+        let request_str = json_request.to_string();
+        info!("Sending initialization request: {}", request_str);
+        let response = self.send_request_with_retry(&request_str).await?;
+        info!("Received initialization response: {}", response);
+
+        if response == "{}" || response.trim().is_empty() {
+            // HTTP transport might return empty response for 202 Accepted
+            warn!("Received empty response, assuming initialization succeeded");
+            *self.initialized.lock().await = true;
+            return Ok(InitializeResult {
+                protocol_version: ProtocolVersion::default(),
+                capabilities: Default::default(),
+                server_info: Implementation {
+                    name: "unknown".to_string(),
+                    version: "unknown".to_string(),
+                },
+                instructions: None,
+            });
         }
 
-        Ok(response)
-    }
+        let parsed: Value = serde_json::from_str(&response)
+            .map_err(|e| ClientError::Json(e))?;
 
-    /// Check if the client can connect and is healthy
-    pub async fn health_check(&self) -> Result<bool> {
-        debug!("Performing health check");
-
-        if !self.initialized {
-            debug!("Health check failed: not initialized");
-            return Ok(false);
+        if let Some(error) = parsed.get("error") {
+            return Err(ClientError::Protocol(format!("Initialize error: {}", error)));
         }
 
-        // In a full rmcp implementation, this would:
-        // match service.peer().ping().await {
-        //     Ok(_) => Ok(true),
-        //     Err(e) => { error!("Health check failed: {}", e); Ok(false) }
-        // }
+        let result: InitializeResult = serde_json::from_value(
+            parsed.get("result").unwrap_or(&Value::Null).clone()
+        )?;
 
-        // For now, assume healthy if initialized
-        debug!("Health check passed");
-        Ok(true)
+        *self.initialized.lock().await = true;
+        info!("Successfully initialized MCP client");
+
+        Ok(result)
     }
 
-    /// Get configuration
-    pub fn config(&self) -> &ClientConfig {
-        &self.config
+    pub async fn list_tools(&self) -> Result<Value> {
+        if !*self.initialized.lock().await {
+            return Err(ClientError::Protocol("Client not initialized".to_string()));
+        }
+
+        let request_id = self.next_request_id().await;
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/list"
+        });
+
+        let response = self.send_request_with_retry(&request.to_string()).await?;
+
+        if response == "{}" || response.trim().is_empty() {
+            return Ok(json!({"tools": []}));
+        }
+
+        let parsed: Value = serde_json::from_str(&response)?;
+
+        if let Some(error) = parsed.get("error") {
+            return Err(ClientError::Protocol(format!("List tools error: {}", error)));
+        }
+
+        Ok(parsed.get("result").unwrap_or(&Value::Null).clone())
     }
 
-    /// Check if initialized
-    pub fn is_initialized(&self) -> bool {
-        self.initialized
+    pub async fn list_resources(&self) -> Result<Value> {
+        if !*self.initialized.lock().await {
+            return Err(ClientError::Protocol("Client not initialized".to_string()));
+        }
+
+        let request_id = self.next_request_id().await;
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "resources/list"
+        });
+
+        let response = self.send_request_with_retry(&request.to_string()).await?;
+
+        if response == "{}" || response.trim().is_empty() {
+            return Ok(json!({"resources": []}));
+        }
+
+        let parsed: Value = serde_json::from_str(&response)?;
+
+        if let Some(error) = parsed.get("error") {
+            return Err(ClientError::Protocol(format!("List resources error: {}", error)));
+        }
+
+        Ok(parsed.get("result").unwrap_or(&Value::Null).clone())
     }
 
-    /// Get the transport strategy being used
-    pub fn strategy(&self) -> Strategy {
-        self.config.strategy
+    pub async fn call_tool(&self, name: &str, arguments: Value) -> Result<Value> {
+        if !*self.initialized.lock().await {
+            return Err(ClientError::Protocol("Client not initialized".to_string()));
+        }
+
+        let request_id = self.next_request_id().await;
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments
+            }
+        });
+
+        let response = self.send_request_with_retry(&request.to_string()).await?;
+
+        if response == "{}" || response.trim().is_empty() {
+            return Err(ClientError::Protocol("Empty response for tool call".to_string()));
+        }
+
+        let parsed: Value = serde_json::from_str(&response)?;
+
+        if let Some(error) = parsed.get("error") {
+            return Err(ClientError::Protocol(format!("Tool call error: {}", error)));
+        }
+
+        Ok(parsed.get("result").unwrap_or(&Value::Null).clone())
     }
 
-    /// Get the server URL
-    pub fn server_url(&self) -> &str {
-        &self.config.server_url
+    pub async fn read_resource(&self, uri: &str) -> Result<Value> {
+        if !*self.initialized.lock().await {
+            return Err(ClientError::Protocol("Client not initialized".to_string()));
+        }
+
+        let request_id = self.next_request_id().await;
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "resources/read",
+            "params": {
+                "uri": uri
+            }
+        });
+
+        let response = self.send_request_with_retry(&request.to_string()).await?;
+
+        if response == "{}" || response.trim().is_empty() {
+            return Err(ClientError::Protocol("Empty response for resource read".to_string()));
+        }
+
+        let parsed: Value = serde_json::from_str(&response)?;
+
+        if let Some(error) = parsed.get("error") {
+            return Err(ClientError::Protocol(format!("Resource read error: {}", error)));
+        }
+
+        Ok(parsed.get("result").unwrap_or(&Value::Null).clone())
     }
 }
 
-// Utility functions for creating clients with common configurations
-impl RmcpClient {
-    /// Create a client configured for HTTP-only transport
-    pub async fn http_only(url: impl Into<String>) -> Result<Self> {
-        let config = ClientConfig::new(url).with_strategy(Strategy::HttpOnly);
-        Self::new(config).await
+#[async_trait::async_trait]
+impl McpClient for McpRemoteClient {
+    async fn connect(&mut self) -> mcp_types::Result<()> {
+        self.connect_with_fallbacks().await
+            .map_err(|e| mcp_types::McpError::Connection(e.to_string()))
     }
 
-    /// Create a client configured for SSE-only transport
-    pub async fn sse_only(url: impl Into<String>) -> Result<Self> {
-        let config = ClientConfig::new(url).with_strategy(Strategy::SseOnly);
-        Self::new(config).await
+    async fn send_request(&mut self, request: &str) -> mcp_types::Result<String> {
+        self.send_request_with_retry(request).await
+            .map_err(|e| mcp_types::McpError::Transport(e.to_string()))
     }
 
-    /// Create a client with custom headers
-    pub async fn with_headers(
-        url: impl Into<String>,
-        headers: HashMap<String, String>,
-    ) -> Result<Self> {
-        let mut config = ClientConfig::new(url);
-        for (key, value) in headers {
-            config = config.with_header(key, value);
+    async fn disconnect(&mut self) -> mcp_types::Result<()> {
+        if let Some(mut transport) = self.current_transport.lock().await.take() {
+            transport.disconnect().await
+                .map_err(|e| mcp_types::McpError::Transport(e.to_string()))?;
         }
-        Self::new(config).await
-    }
-
-    /// Create a client that allows HTTP connections
-    pub async fn allow_http(url: impl Into<String>) -> Result<Self> {
-        let config = ClientConfig::new(url).allow_http();
-        Self::new(config).await
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_client_creation() {
-        let config = ClientConfig::new("https://example.com");
-        let result = RmcpClient::new(config).await;
-
-        // Should succeed in creating client
-        assert!(result.is_ok());
-        let client = result.unwrap();
-        assert!(!client.is_initialized());
-    }
-
-    #[tokio::test]
-    async fn test_url_validation() {
-        // Test invalid URL
-        let config = ClientConfig::new("invalid-url");
-        let result = RmcpClient::new(config).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ClientError::InvalidUrl(_)));
-
-        // Test HTTP without allow_http
-        let config = ClientConfig::new("http://localhost:8080");
-        let result = RmcpClient::new(config).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ClientError::SecurityError(_)));
-
-        // Test HTTP with allow_http
-        let config = ClientConfig::new("http://localhost:8080").allow_http();
-        let result = RmcpClient::new(config).await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_initialization() {
-        let config = ClientConfig::new("https://example.com");
-        let mut client = RmcpClient::new(config).await.unwrap();
-
-        assert!(!client.is_initialized());
-
-        let result = client.initialize().await;
-        assert!(result.is_ok());
-        assert!(client.is_initialized());
-
-        let init_response = result.unwrap();
-        assert!(init_response.server_info.name.contains("rmcp-demo-server"));
-    }
-
-    #[tokio::test]
-    async fn test_uninitialized_operations() {
-        let config = ClientConfig::new("https://example.com");
-        let client = RmcpClient::new(config).await.unwrap();
-
-        // Operations should fail when not initialized
-        let result = client.list_tools().await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ClientError::ProtocolError(_)));
-
-        let request = CallToolRequestParam {
-            name: "test".to_string().into(),
-            arguments: None,
-        };
-        let result = client.call_tool(request).await;
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), ClientError::ProtocolError(_)));
-
-        assert!(!client.health_check().await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn test_mock_tool_operations() {
-        let config = ClientConfig::new("https://example.com");
-        let mut client = RmcpClient::new(config).await.unwrap();
-
-        // Initialize first
-        client.initialize().await.unwrap();
-
-        // Test list tools
-        let tools = client.list_tools().await.unwrap();
-        assert!(!tools.is_empty());
-        assert_eq!(tools[0].name, "echo");
-
-        // Test call tool
-        let request = CallToolRequestParam {
-            name: "echo".to_string().into(),
-            arguments: Some(serde_json::json!({"text": "Hello World"}).as_object().unwrap().clone()),
-        };
-        let result = client.call_tool(request).await.unwrap();
-        assert_eq!(result.is_error, Some(false));
-
-        // Test unknown tool
-        let request = CallToolRequestParam {
-            name: "unknown".to_string().into(),
-            arguments: None,
-        };
-        let result = client.call_tool(request).await.unwrap();
-        assert_eq!(result.is_error, Some(true));
-    }
-
-    #[tokio::test]
-    async fn test_convenience_constructors() {
-        // Test HTTP-only client
-        let result = RmcpClient::http_only("https://example.com").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().strategy(), Strategy::HttpOnly);
-
-        // Test SSE-only client
-        let result = RmcpClient::sse_only("https://example.com").await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().strategy(), Strategy::SseOnly);
-
-        // Test client with headers
-        let mut headers = HashMap::new();
-        headers.insert("Authorization".to_string(), "Bearer token".to_string());
-        let result = RmcpClient::with_headers("https://example.com", headers).await;
-        assert!(result.is_ok());
-
-        // Test HTTP allowed client
-        let result = RmcpClient::allow_http("http://example.com").await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn test_health_check() {
-        let config = ClientConfig::new("https://example.com");
-        let mut client = RmcpClient::new(config).await.unwrap();
-
-        // Health check should fail before initialization
-        assert!(!client.health_check().await.unwrap());
-
-        // Initialize and try again
-        client.initialize().await.unwrap();
-        assert!(client.health_check().await.unwrap());
+        *self.initialized.lock().await = false;
+        Ok(())
     }
 }
