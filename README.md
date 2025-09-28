@@ -2,7 +2,7 @@
 
 A Rust implementation of a Model Context Protocol (MCP) remote proxy system that enables bridging local MCP clients to remote MCP servers with multiple transport options and fallback mechanisms.
 
-## 🚀 Features
+## Features
 
 - **Multiple Transport Support**: HTTP (Streamable HTTP), STDIO, and TCP transports
 - **Fallback Mechanisms**: Automatic fallback between transport types on connection failure
@@ -11,7 +11,7 @@ A Rust implementation of a Model Context Protocol (MCP) remote proxy system that
 - **Protocol Compliance**: Full MCP 2024-11-05 protocol specification compliance
 - **Async/Await**: Built with Tokio for high-performance async operations
 
-## 📦 Architecture
+## Architecture
 
 The project is organized as a Rust workspace with the following crates:
 
@@ -32,7 +32,7 @@ The project is organized as a Rust workspace with the following crates:
 - **MCP Proxy** (`mcp-proxy`): Bidirectional message forwarding with multiple strategies
 - **MCP Remote** (`mcp-remote`): CLI tool for running proxies and testing connections
 
-## 🛠️ Installation
+## Installation
 
 ### Prerequisites
 
@@ -53,7 +53,7 @@ cargo build --release
 cargo install --path crates/mcp-remote
 ```
 
-## 🎯 Usage
+## Usage
 
 ### Basic HTTP Proxy
 
@@ -61,6 +61,30 @@ Forward requests from local STDIO to a remote HTTP MCP server:
 
 ```bash
 mcp-remote proxy --endpoint "http://remote-server:8080/mcp" --debug
+```
+
+### Proxy with Authentication
+
+Use Bearer token or API key authentication:
+
+```bash
+# With Bearer token
+mcp-remote proxy \
+  --endpoint "https://api.githubcopilot.com/mcp" \
+  --auth-token "your-bearer-token" \
+  --debug
+
+# With API key
+mcp-remote proxy \
+  --endpoint "https://api.example.com/mcp" \
+  --api-key "your-api-key" \
+  --debug
+
+# With custom headers
+mcp-remote proxy \
+  --endpoint "http://remote-server:8080/mcp" \
+  --headers "Authorization:Bearer token123,X-Custom:value" \
+  --debug
 ```
 
 ### Proxy with Fallbacks
@@ -73,6 +97,7 @@ mcp-remote proxy \
   --fallbacks "stdio,tcp" \
   --timeout 30 \
   --retry-attempts 3 \
+  --retry-delay 1000 \
   --debug
 ```
 
@@ -85,6 +110,8 @@ mcp-remote load-balance \
   --endpoints "http://server1:8080/mcp,http://server2:8080/mcp,http://server3:8080/mcp" \
   --transport "http" \
   --timeout 30 \
+  --retry-attempts 3 \
+  --auth-token "your-token" \
   --debug
 ```
 
@@ -96,6 +123,12 @@ Test connectivity to a remote server:
 # Test HTTP connection
 mcp-remote test --endpoint "http://remote-server:8080/mcp" --transport "http"
 
+# Test with authentication
+mcp-remote test \
+  --endpoint "https://api.githubcopilot.com/mcp" \
+  --transport "http" \
+  --auth-token "your-token"
+
 # Test TCP connection
 mcp-remote test --endpoint "localhost:9090" --transport "tcp"
 
@@ -103,7 +136,110 @@ mcp-remote test --endpoint "localhost:9090" --transport "tcp"
 mcp-remote test --endpoint "python my-server.py" --transport "stdio"
 ```
 
-## 🔧 Configuration
+### Notification Demo
+
+Test MCP notification system:
+
+```bash
+# Send 3 demo notifications
+mcp-remote notification-demo --count 3
+```
+
+### Global Options
+
+All commands support these global options:
+
+```bash
+# Enable debug logging
+--debug
+
+# Set custom log level
+--log-level "info"  # trace, debug, info, warn, error
+```
+
+## Configuration
+
+### Environment Variables
+
+Both `.zed/settings.json` and `inspector.config.json` support environment variables for secure credential management:
+
+**.zed/settings.json:**
+
+```json
+{
+  "context_servers": {
+    "Context7": {
+      "source": "custom",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp",
+        "--api-key",
+        "${CONTEXT7_API_KEY}"
+      ],
+      "env": {
+        "CONTEXT7_API_KEY": "your-api-key"
+      }
+    },
+    "Github": {
+      "source": "custom",
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "https://api.githubcopilot.com/mcp",
+        "--header",
+        "Authorization: Bearer ${GITHUB_TOKEN}"
+      ],
+      "env": {
+        "GITHUB_TOKEN": "your-github-token"
+      }
+    }
+  }
+}
+```
+
+**inspector.config.json:**
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "./target/release/mcp-remote",
+      "args": [
+        "proxy",
+        "--endpoint",
+        "https://api.githubcopilot.com/mcp",
+        "--headers",
+        "\"Authorization: Bearer ${GITHUB_TOKEN}\""
+      ],
+      "env": {
+        "GITHUB_TOKEN": "your-github-token"
+      }
+    },
+    "cc": {
+      "command": "./target/release/mcp-remote",
+      "args": [
+        "proxy",
+        "--endpoint",
+        "https://mcp.context7.com/mcp",
+        "--headers",
+        "\"Authorization: Bearer ${CONTEXT7_API_KEY}\""
+      ],
+      "env": {
+        "CONTEXT7_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+You can override these values by setting environment variables in your shell:
+
+```bash
+export GITHUB_TOKEN="your-actual-token"
+export CONTEXT7_API_KEY="your-actual-api-key"
+```
 
 ### Transport Types
 
@@ -130,7 +266,7 @@ The server implements different logging strategies based on the `--debug` flag:
 - **Production Mode**: Uses `notifications/message` and writes to STDERR
 - **No timestamps/colors** for `notifications/message` logs (MCP compliance)
 
-## 🧩 Integration Examples
+## Integration Examples
 
 ### Claude Desktop Configuration
 
@@ -171,7 +307,7 @@ docker build -t mcp-remote .
 docker run -i mcp-remote proxy --endpoint "http://host.docker.internal:8080/mcp"
 ```
 
-## 📋 CLI Commands
+## CLI Commands
 
 ### `proxy`
 
@@ -207,7 +343,7 @@ Test connection to a remote MCP server
 - `--transport`: Transport type (default: http)
 - `--timeout`: Connection timeout in seconds (default: 10)
 
-## 🔍 Protocol Details
+## Protocol Details
 
 ### MCP Compliance
 
@@ -233,7 +369,7 @@ This implementation follows the MCP 2024-11-05 specification:
         │                       │ (fallbacks)           │
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Run Tests
 
@@ -258,7 +394,7 @@ The proxy has been tested with:
 - Load balancing across multiple servers
 - Error handling and recovery
 
-## 📚 API Documentation
+## API Documentation
 
 ### Core Traits
 
@@ -286,7 +422,7 @@ pub trait McpClientTransport: Send + Sync {
 }
 ```
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
@@ -294,18 +430,18 @@ pub trait McpClientTransport: Send + Sync {
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [RMCP](https://docs.rs/rmcp) - Rust SDK for Model Context Protocol
 - [Tokio](https://tokio.rs/) - Asynchronous runtime for Rust
 - [Clap](https://clap.rs/) - Command Line Argument Parser
 - [Serde](https://serde.rs/) - Serialization framework
 
-## 📞 Support
+## Support
 
 For questions and support:
 

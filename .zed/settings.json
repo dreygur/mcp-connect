@@ -7,7 +7,7 @@
         "-y",
         "@upstash/context7-mcp",
         "--api-key",
-        "ctx7sk-ef32cd94-02c5-4bf4-8560-7100828db6ff"
+        "${CONTEXT7_API_KEY}"
       ]
     },
     "Github": {
@@ -18,7 +18,7 @@
         "mcp-remote",
         "https://api.githubcopilot.com/mcp",
         "--header",
-        "Authorization: Bearer "
+        "Authorization: Bearer ${GITHUB_TOKEN}"
       ]
     }
   }
