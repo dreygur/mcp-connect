@@ -166,6 +166,9 @@ impl McpStdioServer {
         let server_info = Implementation {
             name: "mcp-stdio-server".to_string(),
             version: "0.1.0".to_string(),
+            title: None,
+            icons: None,
+            website_url: None,
         };
 
         let capabilities = ServerCapabilities::builder()

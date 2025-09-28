@@ -19,6 +19,15 @@ pub enum ServerError {
 
     #[error("MCP error: {0}")]
     Mcp(#[from] mcp_types::McpError),
+
+    #[error("OAuth configuration error: {0}")]
+    InvalidOAuthConfig(String),
+
+    #[error("OAuth state error: {0}")]
+    InvalidOAuthState(String),
+
+    #[error("OAuth error: {0}")]
+    OAuthError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ServerError>;

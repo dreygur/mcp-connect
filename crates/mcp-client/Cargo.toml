@@ -16,3 +16,7 @@ rmcp = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
 base64 = "0.22"
+oauth2 = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+urlencoding = { workspace = true }

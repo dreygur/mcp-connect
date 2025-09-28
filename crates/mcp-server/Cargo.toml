@@ -15,3 +15,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rmcp = { workspace = true }
 async-trait = { workspace = true }
+oauth2 = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
+urlencoding = { workspace = true }

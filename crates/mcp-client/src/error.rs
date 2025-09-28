@@ -28,6 +28,9 @@ pub enum ClientError {
 
     #[error("MCP error: {0}")]
     Mcp(#[from] mcp_types::McpError),
+
+    #[error("OAuth error: {0}")]
+    OAuthError(String),
 }
 
 pub type Result<T> = std::result::Result<T, ClientError>;

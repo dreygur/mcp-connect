@@ -18,8 +18,12 @@ clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-core = "0.1"
-rmcp = "0.1"
+rmcp = { version = "0.7", features = ["auth"] }
 reqwest = { version = "0.11", features = ["json", "stream"] }
 futures = "0.3"
 async-trait = "0.1"
 base64 = "0.21"
+oauth2 = { version = "5.0", features = ["reqwest"] }
+url = "2.4"
+uuid = { version = "1.0", features = ["v4"] }
+urlencoding = "2.1"

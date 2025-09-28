@@ -3,12 +3,7 @@
     "Context7": {
       "source": "custom",
       "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp",
-        "--api-key",
-        "${CONTEXT7_API_KEY}"
-      ]
+      "args": ["-y", "@upstash/context7-mcp", "--api-key", "${PAT_CONTEXT7}"]
     },
     "Github": {
       "source": "custom",
@@ -18,7 +13,7 @@
         "mcp-remote",
         "https://api.githubcopilot.com/mcp",
         "--header",
-        "Authorization: Bearer ${GITHUB_TOKEN}"
+        "Authorization: Bearer ${PAT_GITHUB}"
       ]
     }
   }

@@ -28,6 +28,15 @@ pub enum ProxyError {
 
     #[error("Strategy error: {0}")]
     Strategy(String),
+
+    #[error("Authentication error: {0}")]
+    Auth(String),
+
+    #[error("Authorization error: {0}")]
+    Authorization(String),
+
+    #[error("Protocol error: {0}")]
+    Protocol(String),
 }
 
 pub type Result<T> = std::result::Result<T, ProxyError>;

@@ -49,6 +49,9 @@ impl McpRemoteClient {
         let client_info = Implementation {
             name: "mcp-remote-client".to_string(),
             version: "0.1.0".to_string(),
+            title: None,
+            icons: None,
+            website_url: None,
         };
 
         let capabilities = ClientCapabilities::builder()
@@ -72,6 +75,9 @@ impl McpRemoteClient {
         let client_info = Implementation {
             name: "mcp-remote-client".to_string(),
             version: "0.1.0".to_string(),
+            title: None,
+            icons: None,
+            website_url: None,
         };
 
         let capabilities = ClientCapabilities::builder()
@@ -116,6 +122,9 @@ impl McpRemoteClient {
         let client_info = Implementation {
             name: "mcp-remote-client".to_string(),
             version: "0.1.0".to_string(),
+            title: None,
+            icons: None,
+            website_url: None,
         };
 
         let capabilities = ClientCapabilities::builder()
@@ -251,6 +260,9 @@ impl McpRemoteClient {
                 server_info: Implementation {
                     name: "unknown".to_string(),
                     version: "unknown".to_string(),
+                    title: None,
+                    icons: None,
+                    website_url: None,
                 },
                 instructions: None,
             });
