@@ -17,6 +17,7 @@ pub struct McpStdioServer {
     log_sender: Option<mpsc::UnboundedSender<LogMessage>>,
 }
 
+#[allow(dead_code)]
 impl McpStdioServer {
     pub fn new(debug_mode: bool) -> Self {
         let stdin = AsyncBufReader::new(tokio::io::stdin());

@@ -17,6 +17,7 @@ pub struct AuthProxyConfig {
 
 pub struct AuthenticatedProxy {
     config: AuthProxyConfig,
+    #[allow(dead_code)]
     server_oauth: Option<Arc<OAuthManager>>,
     client_oauth: Option<Arc<OAuthClient>>,
     authenticated_sessions: Arc<RwLock<HashMap<String, ClientToken>>>,
@@ -119,18 +120,16 @@ impl AuthenticatedProxy {
             .and_then(|e| e.as_u64());
 
         let expires_at = expires_in.map(|seconds| {
-            std::time::SystemTime::now() + std::time::Duration::from_secs(seconds)
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() + seconds
         });
 
         let token = ClientToken {
             access_token: access_token.to_string(),
             refresh_token: refresh_token.map(|rt| rt.to_string()),
-            expires_at: expires_in.map(|seconds| {
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() + seconds
-            }),
+            expires_at,
             scope: vec![], // Default empty scope
         };
 
