@@ -2,7 +2,8 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use mcp_client::{McpRemoteClient, transport::TransportConfig};
 use mcp_proxy::{stdio_proxy::StdioProxyBuilder, strategy::{ForwardingStrategy, LoadBalancingStrategy}};
-use mcp_types::{TransportType, McpClient};
+use mcp_types::{TransportType, McpClient, LogLevel};
+use serde_json::json;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::Arc;
@@ -110,6 +111,12 @@ enum Commands {
         #[arg(long, help = "Custom User-Agent header")]
         user_agent: Option<String>,
     },
+
+    /// Demo MCP server notifications
+    NotificationDemo {
+        #[arg(long, help = "Number of test notifications to send", default_value = "3")]
+        count: u32,
+    },
 }
 
 fn parse_transport_type(transport: &str) -> Result<TransportType> {
@@ -171,6 +178,24 @@ fn build_transport_config(
     }
 
     Ok(config)
+}
+
+// Simple function to send MCP notifications to STDOUT
+fn send_mcp_notification(level: LogLevel, message: &str) {
+    let notification = json!({
+        "jsonrpc": "2.0",
+        "method": "notifications/message",
+        "params": {
+            "level": level,
+            "logger": "mcp-proxy",
+            "data": message
+        }
+    });
+
+    if let Ok(json_str) = serde_json::to_string(&notification) {
+        println!("{}", json_str);
+        let _ = io::stdout().flush();
+    }
 }
 
 // Custom writer that either writes to stderr (debug mode) or discards (non-debug mode)
@@ -242,6 +267,39 @@ fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
     Ok(())
 }
 
+async fn run_notification_demo(count: u32) -> Result<()> {
+    info!("Starting MCP Notification Demo");
+
+    // Send a few different types of notifications
+    for i in 1..=count {
+        match i % 4 {
+            1 => {
+                send_mcp_notification(LogLevel::Info, &format!("Demo info message {}", i));
+                info!("Sent info notification {}", i);
+            }
+            2 => {
+                send_mcp_notification(LogLevel::Warn, &format!("Demo warning message {}", i));
+                warn!("Sent warning notification {}", i);
+            }
+            3 => {
+                send_mcp_notification(LogLevel::Error, &format!("Demo error message {}", i));
+                error!("Sent error notification {}", i);
+            }
+            0 => {
+                send_mcp_notification(LogLevel::Debug, &format!("Demo debug message {}", i));
+                info!("Sent debug notification {}", i);
+            }
+            _ => unreachable!(),
+        }
+
+        // Small delay between notifications
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    info!("Notification demo completed");
+    Ok(())
+}
+
 async fn run_proxy(
     endpoint: String,
     fallbacks: Option<Vec<String>>,
@@ -256,6 +314,9 @@ async fn run_proxy(
 ) -> Result<()> {
     info!("Starting MCP Remote Proxy");
     info!("Primary endpoint: {}", endpoint);
+
+    // Send MCP notification that proxy is starting
+    send_mcp_notification(LogLevel::Info, &format!("MCP Proxy starting with endpoint: {}", endpoint));
 
     let fallback_transports = if let Some(fallbacks) = fallbacks {
         parse_fallback_transports(&fallbacks)?
@@ -286,6 +347,9 @@ async fn run_proxy(
         .build()?;
 
     info!("Proxy ready, listening on STDIO");
+
+    // Send MCP notification that proxy is ready
+    send_mcp_notification(LogLevel::Info, "MCP Proxy ready and listening for requests");
     proxy.run().await?;
 
     Ok(())
@@ -476,6 +540,10 @@ async fn main() -> Result<()> {
                 api_key,
                 user_agent,
             ).await
+        }
+
+        Commands::NotificationDemo { count } => {
+            run_notification_demo(count).await
         }
     };
 
