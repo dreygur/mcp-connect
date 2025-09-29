@@ -2,6 +2,7 @@
 name = "mcp-proxy"
 version = "0.1.0"
 edition = "2021"
+authors = ["Rakibul Yeasin <ryeasin03@gmail.com>"]
 
 [dependencies]
 mcp-types = { path = "../mcp-types" }
