@@ -1,0 +1,72 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/mcp-connect-config.schema.json",
+  "version": "1.0",
+  "envFile": ".env",
+  "routing": {
+    "method": "namespace-prefix",
+    "separator": "/"
+  },
+  "registries": {
+    "company-registry": {
+      "baseUrl": "https://mcp-registry.company.com",
+      "apiVersion": "v1"
+    }
+  },
+  "defaultRegistry": "default",
+  "servers": {
+    "github": {
+      "name": "io.github.modelcontextprotocol/github-mcp-server",
+      "description": "GitHub repository management",
+      "version": "latest",
+      "remote": {
+        "type": "streamable-http",
+        "url": "https://api.githubcopilot.com/mcp",
+        "headers": [
+          {
+            "key": "Authorization",
+            "value": "Bearer ${GITHUB_TOKEN}"
+          }
+        ]
+      },
+      "timeout": 30,
+      "retryAttempts": 3
+    },
+    "context7": {
+      "name": "io.github.modelcontextprotocol/context7-mcp-server",
+      "description": "Code documentation search",
+      "version": "latest",
+      "remote": {
+        "type": "streamable-http",
+        "url": "https://mcp.context7.com/mcp",
+        "headers": [
+          {
+            "key": "Authorization",
+            "value": "Bearer ${CONTEXT7_API_KEY}"
+          }
+        ]
+      },
+      "timeout": 30,
+      "retryAttempts": 3
+    },
+    "custom-api": {
+      "name": "Custom API Server",
+      "description": "Custom internal API",
+      "remote": {
+        "type": "streamable-http",
+        "url": "https://api.example.com/mcp",
+        "headers": [
+          {
+            "key": "Authorization",
+            "value": "Bearer ${API_TOKEN}"
+          },
+          {
+            "key": "X-Custom-Header",
+            "value": "custom-value"
+          }
+        ]
+      },
+      "timeout": 60,
+      "retryAttempts": 5
+    }
+  }
+}

@@ -1,0 +1,15 @@
+# Environment Variables Template
+# Copy this file to .env and fill in your actual values
+
+# GitHub
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
+
+# Context7
+CONTEXT7_API_KEY=ctx7sk_xxxxxxxxxxxxx
+
+# Custom API
+API_TOKEN=xxxxxxxxxxxxx
+
+# Add more tokens as needed
+# MY_SERVICE_TOKEN=xxxxxxxxxxxxx
+

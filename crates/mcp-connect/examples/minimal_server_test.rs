@@ -4,7 +4,8 @@
 
 use mcp_client::{McpRemoteClient, transport::TransportConfig};
 use mcp_config::ConfigManager;
-use mcp_proxy::{StdioProxyBuilder, strategy::ForwardingStrategy};
+use mcp_proxy::stdio_proxy::StdioProxyBuilder;
+use mcp_proxy::strategy::ForwardingStrategy;
 use mcp_registry::RegistryClient;
 use mcp_server::McpStdioServer;
 use mcp_types::{TransportType, McpServer};
@@ -36,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Test 2: Registry Client
     println!("2. Testing Registry Client...");
     match RegistryClient::new() {
-        Ok(client) => {
+        Ok(_client) => {
             println!("✓ Registry client created successfully");
             // Note: We don't actually fetch here to avoid network dependency in tests
         }
@@ -192,7 +193,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
     ];
 
-    let custom_client = McpRemoteClient::with_custom_transports(custom_transports).await;
+    let _custom_client = McpRemoteClient::with_custom_transports(custom_transports).await;
     println!("✓ Custom client configuration created successfully");
     println!("  Transport 1: HTTP (example.com:8080)");
     println!("  Transport 2: TCP (localhost:9090)");
