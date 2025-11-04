@@ -16,7 +16,7 @@ This is the recommended method for getting the latest features and bug fixes.
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 
 # Build in release mode
@@ -42,20 +42,17 @@ cargo install mcp-connect
 
 ### Method 3: Pre-built Binaries
 
-Download pre-built binaries from the [Releases](https://github.com/yourusername/mcp-connect/releases) page.
+Download pre-built binaries from the [Releases](https://github.com/dreygur/mcp-connect/releases) page.
 
 **Linux:**
 ```bash
-wget https://github.com/yourusername/mcp-connect/releases/latest/download/mcp-connect-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/dreygur/mcp-connect/releases/latest/download/mcp-connect-x86_64-unknown-linux-gnu.tar.gz
 tar -xzf mcp-connect-x86_64-unknown-linux-gnu.tar.gz
 sudo mv mcp-connect /usr/local/bin/
 ```
 
 **macOS:**
-```bash
-brew install mcp-connect  # If available via Homebrew
-# Or download from releases page
-```
+download from releases page
 
 **Windows:**
 Download the `.exe` from the releases page and add to your PATH.
@@ -73,7 +70,7 @@ sudo apt install libssl3 libssl-dev
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build MCP Connect
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build --release
 ```
@@ -88,7 +85,7 @@ sudo dnf install openssl-devel
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build MCP Connect
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build --release
 ```
@@ -103,7 +100,7 @@ brew install openssl
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Build MCP Connect
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build --release
 ```
@@ -117,7 +114,7 @@ cargo build --release
 3. Clone and build:
 
 ```powershell
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build --release
 ```

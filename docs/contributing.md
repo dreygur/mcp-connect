@@ -7,7 +7,7 @@ Thank you for your interest in contributing to MCP Connect! This guide will help
 1. **Fork the repository** on GitHub
 2. **Clone your fork**:
    ```bash
-   git clone https://github.com/yourusername/mcp-connect.git
+   git clone https://github.com/dreygur/mcp-connect.git
    cd mcp-connect
    ```
 3. **Add upstream remote**:
@@ -27,7 +27,7 @@ Thank you for your interest in contributing to MCP Connect! This guide will help
 
 ```bash
 # Clone and build
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build
 

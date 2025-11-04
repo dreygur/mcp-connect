@@ -24,14 +24,21 @@ A powerful, production-ready proxy and multiplexing server for the Model Context
 
 ```bash
 # From source
-git clone https://github.com/yourusername/mcp-connect.git
+git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo build --release
+
+# Or from release
+# Linux/Mac
+curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
+# Windows
+irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
+
 
 # Install globally
 cargo install --path crates/mcp-connect
 
-# Or using cargo
+# Or from github
 cargo install --git https://github.com/dreygur/mcp-connect
 
 # Or use pre-built binaries (when available)
@@ -163,8 +170,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 - **Documentation**: See the [`docs/`](docs/) directory
-- **Issues**: [GitHub Issues](https://github.com/yourusername/mcp-connect/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/mcp-connect/discussions)
+- **Issues**: [GitHub Issues](https://github.com/dreygur/mcp-connect/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/dreygur/mcp-connect/discussions)
 
 ---
 
