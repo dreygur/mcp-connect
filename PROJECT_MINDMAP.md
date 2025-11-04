@@ -1,7 +1,7 @@
-# MCP Remote Proxy - Project Mindmap
+# MCP Connect - Project Mindmap
 
 ```
-                                    MCP Remote Proxy
+                                    MCP Connect
                                           │
                     ┌─────────────────────┼─────────────────────┐
                     │                     │                     │

@@ -1,4 +1,4 @@
-//! # MCP Remote Proxy CLI
+//! # MCP Connect CLI
 //!
 //! Command-line interface for the Model Context Protocol (MCP) remote proxy system.
 //!
@@ -53,13 +53,13 @@ use std::time::Duration;
 use tracing::{error, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
-/// Command-line interface for MCP Remote Proxy.
+/// Command-line interface for MCP Connect.
 ///
 /// This structure defines the main CLI interface using clap, providing
 /// global options and subcommands for different proxy operations.
 #[derive(Parser)]
 #[command(name = "mcp-connect")]
-#[command(about = "MCP Remote Proxy - Bridge local MCP clients to remote MCP servers")]
+#[command(about = "MCP Connect - Bridge local MCP clients to remote MCP servers")]
 #[command(version = "0.1.0")]
 struct Cli {
     /// The subcommand to execute
@@ -450,7 +450,7 @@ async fn run_proxy(
     user_agent: Option<String>,
     debug: bool,
 ) -> Result<()> {
-    info!("Starting MCP Remote Proxy");
+    info!("Starting MCP Connect");
     info!("Primary endpoint: {}", endpoint);
 
     // Send MCP notification that proxy is starting

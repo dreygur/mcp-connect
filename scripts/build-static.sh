@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Simple static build for MCP Remote Proxy
+# Simple static build for MCP Connect
 # Creates a binary with statically linked OpenSSL
 
 set -e
 
-echo "🚀 Building MCP Remote Proxy with static OpenSSL..."
+echo "🚀 Building MCP Connect with static OpenSSL..."
 
 # Set environment for static OpenSSL
 export OPENSSL_STATIC=1

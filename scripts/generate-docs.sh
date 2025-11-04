@@ -1,9 +1,9 @@
 #!/bin/bash
 
-# Generate Rust documentation for MCP Remote Proxy project
+# Generate Rust documentation for MCP Connect project
 # This script builds comprehensive documentation for all crates
 
-echo "🚀 Generating Rust documentation for MCP Remote Proxy..."
+echo "🚀 Generating Rust documentation for MCP Connect..."
 
 # Clean previous documentation
 echo "🧹 Cleaning previous documentation..."
@@ -18,7 +18,7 @@ cargo doc \
     --open
 
 echo "✅ Documentation generated successfully!"
-echo "📖 Documentation is available at: target/doc/mcp_remote/index.html"
+echo "📖 Documentation is available at: target/doc/mcp_connect/index.html"
 
 # Additional documentation generation options:
 # --all-features          # Enable all features

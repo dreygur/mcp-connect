@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Simple standalone release build for MCP Remote Proxy
+# Simple standalone release build for MCP Connect
 
 set -e
 
-echo "🚀 Building standalone MCP Remote Proxy..."
+echo "🚀 Building standalone MCP Connect..."
 
 # Set environment variables for static linking
 export OPENSSL_STATIC=1

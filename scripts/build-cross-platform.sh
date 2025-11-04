@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# MCP Remote Proxy - Cross-Platform Release Build Script
+# MCP Connect - Cross-Platform Release Build Script
 # Creates standalone binaries for multiple platforms
 
 set -e
@@ -9,7 +9,7 @@ PROJECT_NAME="mcp-connect"
 BINARY_NAME="mcp-connect"
 DIST_DIR="dist-cross"
 
-echo "🌍 Building cross-platform releases for MCP Remote Proxy..."
+echo "🌍 Building cross-platform releases for MCP Connect..."
 
 # Define target platforms
 declare -A TARGETS=(
@@ -152,7 +152,7 @@ main() {
             # Create platform-specific usage guide
             local platform_name=$(basename "$platform_dir")
             cat > "$platform_dir/USAGE.txt" << EOF
-MCP Remote Proxy - $platform_name Release
+MCP Connect - $platform_name Release
 
 This is a fully static binary with no dependencies.
 

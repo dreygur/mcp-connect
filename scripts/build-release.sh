@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# MCP Remote Proxy - Standalone Release Build Script
+# MCP Connect - Standalone Release Build Script
 # Creates a fully static binary with no shared library dependencies
 
 set -e  # Exit on any error
@@ -10,7 +10,7 @@ BINARY_NAME="mcp-connect"
 BUILD_DIR="target/release"
 DIST_DIR="dist"
 
-echo "🚀 Building standalone release for MCP Remote Proxy..."
+echo "🚀 Building standalone release for MCP Connect..."
 echo "📦 Target: ${PROJECT_NAME} -> ${BINARY_NAME}"
 
 # Function to print colored output
@@ -147,7 +147,7 @@ cp LICENSE "$DIST_DIR/" 2>/dev/null || echo "LICENSE not found, skipping..."
 
 # Create a simple usage guide
 cat > "$DIST_DIR/USAGE.txt" << 'EOF'
-MCP Remote Proxy - Standalone Release
+MCP Connect - Standalone Release
 
 This is a fully static binary with no dependencies.
 

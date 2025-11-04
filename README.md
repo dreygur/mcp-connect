@@ -31,6 +31,9 @@ cargo build --release
 # Install globally
 cargo install --path crates/mcp-connect
 
+# Or using cargo
+cargo install --git https://github.com/dreygur/mcp-connect
+
 # Or use pre-built binaries (when available)
 # Download from releases page
 ```
