@@ -37,8 +37,15 @@ pub async fn add(
         // Interactive search mode
         add_interactive(&name).await?
     } else if let Some(registry_path) = registry_path {
-        // Add from registry
-        add_from_registry(&registry_path).await?
+        // Add from registry - check if it's a URL first
+        let path = if registry_path.contains("://") || registry_path.starts_with("github.com") || registry_path.starts_with("www.github.com") {
+            // It's a URL, extract the registry path
+            extract_registry_path(&registry_path)?
+        } else {
+            // It's already a registry path
+            registry_path
+        };
+        add_from_registry(&path).await?
     } else if let Some(url_str) = from_url {
         // Extract registry path from GitHub URL
         let path = extract_registry_path(&url_str)?;
@@ -47,8 +54,15 @@ pub async fn add(
         // Add custom server
         add_custom(&name, &url_str, auth_header.as_deref())?
     } else {
-        // Try to interpret name as registry path
-        add_from_registry(&name).await?
+        // Try to interpret name as registry path - check if it's a URL first
+        let path = if name.contains("://") || name.starts_with("github.com") || name.starts_with("www.github.com") {
+            // It's a URL, extract the registry path
+            extract_registry_path(&name)?
+        } else {
+            // It's already a registry path
+            name.clone()
+        };
+        add_from_registry(&path).await?
     };
 
     // Add to config
@@ -77,7 +91,7 @@ async fn add_interactive(name: &str) -> Result<ServerConfig> {
     // Show options
     println!("\nFound {} server(s):", servers.len());
     for (i, server) in servers.iter().enumerate() {
-        println!("{}. {} - {}", i + 1, server.name, server.description.as_deref().unwrap_or(""));
+        println!("{}. {} - {}", i + 1, server.name, &server.description);
     }
 
     let selection = Text::new("Select server (enter number):")
@@ -99,10 +113,11 @@ async fn add_from_registry(registry_path: &str) -> Result<ServerConfig> {
     info!("Adding server from registry: {}", registry_path);
 
     let client = RegistryClient::new()?;
-    let server = client.get_server(registry_path, "latest").await?;
+    let server_response = client.get_server(registry_path, "latest").await?;
+    let server = &server_response.server;
 
     // Check if server has remote transport
-    if !RegistryClient::has_remote_transport(&server) {
+    if !RegistryClient::has_remote_transport(server) {
         anyhow::bail!(
             "❌ Error: {} only supports STDIO transport (not HTTP).\n\n\
             💡 This server must be configured directly in your IDE.\n\
@@ -112,7 +127,7 @@ async fn add_from_registry(registry_path: &str) -> Result<ServerConfig> {
     }
 
     // Convert to RemoteConfig
-    let remote = RegistryClient::to_remote_config(&server)?
+    let remote = RegistryClient::to_remote_config(server)?
         .context("Server has no remote configuration")?;
 
     // Prompt for URL if needed
@@ -147,9 +162,9 @@ async fn add_from_registry(registry_path: &str) -> Result<ServerConfig> {
     };
 
     Ok(ServerConfig {
-        name: Some(server.name),
-        description: server.description,
-        version: Some(server.version),
+        name: Some(server.name.clone()),
+        description: Some(server.description.clone()),
+        version: Some(server.version.clone()),
         remote: RemoteConfig {
             transport_type: remote.transport_type,
             url,
@@ -189,12 +204,46 @@ fn add_custom(name: &str, url: &str, auth_header: Option<&str>) -> Result<Server
 
 /// Extract registry path from GitHub URL.
 fn extract_registry_path(url: &str) -> Result<String> {
-    // Expected format: https://github.com/mcp/{publisher}/{server-name}
+    // Normalize URL: trim whitespace
+    let url = url.trim();
+
+    // Remove query parameters and fragments first
+    let url = url.split('?').next().unwrap_or(url);
+    let url = url.split('#').next().unwrap_or(url);
+
+    // Then remove trailing slashes
+    let url = url.trim_end_matches('/');
+
+    // Try different GitHub URL patterns
+    // Pattern 1: https://github.com/mcp/{publisher}/{server-name}
     if let Some(path) = url.strip_prefix("https://github.com/mcp/") {
-        Ok(path.to_string())
-    } else {
-        anyhow::bail!("Invalid GitHub MCP registry URL: {}", url);
+        return Ok(path.to_string());
     }
+
+    // Pattern 2: http://github.com/mcp/{publisher}/{server-name}
+    if let Some(path) = url.strip_prefix("http://github.com/mcp/") {
+        return Ok(path.to_string());
+    }
+
+    // Pattern 3: github.com/mcp/{publisher}/{server-name} (no scheme)
+    if let Some(path) = url.strip_prefix("github.com/mcp/") {
+        return Ok(path.to_string());
+    }
+
+    // Pattern 4: www.github.com/mcp/{publisher}/{server-name}
+    if let Some(path) = url.strip_prefix("https://www.github.com/mcp/") {
+        return Ok(path.to_string());
+    }
+
+    if let Some(path) = url.strip_prefix("http://www.github.com/mcp/") {
+        return Ok(path.to_string());
+    }
+
+    if let Some(path) = url.strip_prefix("www.github.com/mcp/") {
+        return Ok(path.to_string());
+    }
+
+    anyhow::bail!("Invalid GitHub MCP registry URL: {}\nExpected format: https://github.com/mcp/{{publisher}}/{{server-name}}", url);
 }
 
 /// List all configured servers.
@@ -374,4 +423,79 @@ pub fn validate() -> Result<()> {
 
     println!("✓ Configuration is valid");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_registry_path_basic() {
+        let url = "https://github.com/mcp/upstash/context7";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_with_trailing_slash() {
+        let url = "https://github.com/mcp/upstash/context7/";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_with_query_params() {
+        let url = "https://github.com/mcp/upstash/context7?tab=readme";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_with_fragment() {
+        let url = "https://github.com/mcp/upstash/context7#readme";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_http() {
+        let url = "http://github.com/mcp/upstash/context7";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_no_scheme() {
+        let url = "github.com/mcp/upstash/context7";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_with_www() {
+        let url = "https://www.github.com/mcp/upstash/context7";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_with_whitespace() {
+        let url = "  https://github.com/mcp/upstash/context7  ";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "upstash/context7");
+    }
+
+    #[test]
+    fn test_extract_registry_path_complex() {
+        let url = "https://github.com/mcp/io.github.modelcontextprotocol/filesystem/?tab=readme#installation";
+        let result = extract_registry_path(url).unwrap();
+        assert_eq!(result, "io.github.modelcontextprotocol/filesystem");
+    }
+
+    #[test]
+    fn test_extract_registry_path_invalid() {
+        let url = "https://gitlab.com/some/project";
+        let result = extract_registry_path(url);
+        assert!(result.is_err());
+    }
 }

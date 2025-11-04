@@ -34,6 +34,66 @@ impl RegistryClient {
         })
     }
 
+    /// Fetch a page of servers from the registry.
+    pub async fn fetch_servers_page(
+        &self,
+        cursor: Option<String>,
+        limit: usize,
+        search_query: Option<&str>,
+    ) -> Result<(Vec<ServerResponse>, Option<String>)> {
+        let mut url = format!("{}/servers?limit={}", self.base_url, limit);
+
+        if let Some(c) = cursor {
+            url.push_str(&format!("&cursor={}", urlencoding::encode(&c)));
+        }
+
+        if let Some(query) = search_query {
+            url.push_str(&format!("&search={}", urlencoding::encode(query)));
+        }
+
+        debug!("GET {}", url);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .context("Failed to list servers")?;
+
+        if !response.status().is_success() {
+            anyhow::bail!("Failed to list servers: HTTP {}", response.status());
+        }
+
+        let list_response: ServerListResponse = response
+            .json()
+            .await
+            .context("Failed to parse server list")?;
+
+        let next_cursor = list_response.metadata.next_cursor;
+        Ok((list_response.servers, next_cursor))
+    }
+
+    /// List all servers with full details (using pagination).
+    pub async fn list_all_servers_full(&self) -> Result<Vec<ServerResponse>> {
+        let mut all_servers = Vec::new();
+        let mut cursor: Option<String> = None;
+        let limit = 100;
+
+        loop {
+            let (servers, next_cursor) = self.fetch_servers_page(cursor, limit, None).await?;
+            all_servers.extend(servers);
+
+            if let Some(c) = next_cursor {
+                cursor = Some(c);
+            } else {
+                break;
+            }
+        }
+
+        info!("Fetched {} total servers from registry", all_servers.len());
+        Ok(all_servers)
+    }
+
     /// Search for servers in the registry.
     ///
     /// Returns a list of servers matching the query string.
@@ -49,11 +109,7 @@ impl RegistryClient {
             .filter(|server| {
                 let query_lower = query.to_lowercase();
                 server.name.to_lowercase().contains(&query_lower)
-                    || server
-                        .description
-                        .as_ref()
-                        .map(|d| d.to_lowercase().contains(&query_lower))
-                        .unwrap_or(false)
+                    || server.description.to_lowercase().contains(&query_lower)
             })
             .collect();
 
@@ -62,7 +118,7 @@ impl RegistryClient {
     }
 
     /// Get detailed information about a specific server.
-    pub async fn get_server(&self, name: &str, version: &str) -> Result<ServerDetail> {
+    pub async fn get_server(&self, name: &str, version: &str) -> Result<ServerResponse> {
         info!("Fetching server: {} version {}", name, version);
 
         let url = format!("{}/servers/{}/versions/{}", self.base_url, urlencoding::encode(name), urlencoding::encode(version));
@@ -80,13 +136,13 @@ impl RegistryClient {
             anyhow::bail!("Failed to fetch server '{}': HTTP {}", name, response.status());
         }
 
-        let server: ServerDetail = response
+        let server_response: ServerResponse = response
             .json()
             .await
             .context("Failed to parse server details")?;
 
         info!("Successfully fetched server: {}", name);
-        Ok(server)
+        Ok(server_response)
     }
 
     /// List all servers in the registry with pagination.
@@ -119,7 +175,20 @@ impl RegistryClient {
                 .await
                 .context("Failed to parse server list")?;
 
-            all_servers.extend(list_response.servers);
+            // Convert ServerResponse items to ServerSummary
+            for server_response in list_response.servers {
+                let status = server_response.meta.official
+                    .as_ref()
+                    .map(|o| o.status.clone())
+                    .unwrap_or_else(|| "unknown".to_string());
+
+                all_servers.push(ServerSummary {
+                    name: server_response.server.name,
+                    description: server_response.server.description,
+                    status,
+                    version: server_response.server.version,
+                });
+            }
 
             // Check if there are more pages
             if let Some(next_cursor) = list_response.metadata.next_cursor {
@@ -156,9 +225,11 @@ impl RegistryClient {
 
         let headers = remote.headers.as_ref().map(|h| {
             h.iter()
-                .map(|kv| KeyValue {
-                    key: kv.key.clone(),
-                    value: kv.value.clone(),
+                .filter_map(|kv| {
+                    kv.value.as_ref().map(|v| KeyValue {
+                        key: kv.name.clone(),
+                        value: v.clone(),
+                    })
                 })
                 .collect()
         });
@@ -180,7 +251,7 @@ impl Default for RegistryClient {
 /// Response from the servers list endpoint.
 #[derive(Debug, Deserialize)]
 struct ServerListResponse {
-    servers: Vec<ServerSummary>,
+    servers: Vec<ServerResponse>,
     metadata: ListMetadata,
 }
 
@@ -193,17 +264,56 @@ struct ListMetadata {
     next_cursor: Option<String>,
 }
 
+/// API response wrapper with server data and metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerResponse {
+    pub server: ServerDetail,
+    #[serde(rename = "_meta")]
+    pub meta: ServerMetadata,
+}
+
+/// Registry-managed metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerMetadata {
+    #[serde(rename = "io.modelcontextprotocol.registry/official")]
+    pub official: Option<OfficialMetadata>,
+    /// Allow unknown fields for extensibility
+    #[serde(flatten)]
+    pub additional: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// Official MCP registry metadata.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OfficialMetadata {
+    pub status: String,
+    #[serde(rename = "publishedAt")]
+    pub published_at: Option<String>,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: Option<String>,
+    #[serde(rename = "isLatest")]
+    pub is_latest: Option<bool>,
+}
+
 /// Summary information about a server from the registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerSummary {
     /// Registry name (e.g., "io.github.modelcontextprotocol/github-mcp-server")
     pub name: String,
     /// Human-readable description
-    pub description: Option<String>,
+    pub description: String,
     /// Server status (active, deleted, etc.)
     pub status: String,
     /// Latest version number
     pub version: String,
+}
+
+/// Repository metadata for the MCP server source code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Repository {
+    pub url: Option<String>,
+    pub source: Option<String>,
+    pub id: Option<String>,
+    pub subfolder: Option<String>,
 }
 
 /// Detailed information about a server from the registry.
@@ -214,12 +324,18 @@ pub struct ServerDetail {
     pub schema: Option<String>,
     /// Registry name
     pub name: String,
-    /// Human-readable description
-    pub description: Option<String>,
-    /// Server status
-    pub status: String,
+    /// Human-readable description (optional in practice even though spec says required)
+    #[serde(default)]
+    pub description: String,
+    /// Optional human-readable title
+    pub title: Option<String>,
     /// Version number
     pub version: String,
+    /// Optional website URL
+    #[serde(rename = "websiteUrl")]
+    pub website_url: Option<String>,
+    /// Repository metadata
+    pub repository: Option<Repository>,
     /// Remote transport configurations
     pub remotes: Option<Vec<RemoteTransport>>,
     /// Package configurations (npm, pip, etc.) - not used by mcp-connect
@@ -238,11 +354,16 @@ pub struct RemoteTransport {
     pub headers: Option<Vec<RegistryKeyValue>>,
 }
 
-/// Key-value pair from registry API.
+/// Key-value pair from registry API (for headers and environment variables).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryKeyValue {
-    pub key: String,
-    pub value: String,
+    pub name: String,
+    pub value: Option<String>,
+    pub description: Option<String>,
+    #[serde(rename = "isRequired")]
+    pub is_required: Option<bool>,
+    #[serde(rename = "isSecret")]
+    pub is_secret: Option<bool>,
 }
 
 /// Package configuration from registry (npm, pip, etc.).
@@ -251,7 +372,11 @@ pub struct Package {
     #[serde(rename = "registryType")]
     pub registry_type: String,
     pub identifier: String,
-    pub version: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Allow unknown fields for extensibility (transport, environmentVariables, etc.)
+    #[serde(flatten)]
+    pub additional: std::collections::HashMap<String, serde_json::Value>,
 }
 
 #[cfg(test)]
@@ -269,9 +394,11 @@ mod tests {
         let server = ServerDetail {
             schema: None,
             name: "test/server".to_string(),
-            description: None,
-            status: "active".to_string(),
+            description: "A test server".to_string(),
+            title: None,
             version: "1.0.0".to_string(),
+            website_url: None,
+            repository: None,
             remotes: Some(vec![RemoteTransport {
                 transport_type: "streamable-http".to_string(),
                 url: "https://example.com/mcp".to_string(),

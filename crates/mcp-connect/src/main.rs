@@ -77,13 +77,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum RegistryCommands {
-    /// Search for servers in the registry
+    /// Search for servers in the registry (only shows remote-compatible servers)
     Search {
         /// Search query
         query: String,
 
-        #[arg(long, help = "Only show servers with remote (HTTP) transport")]
-        remote_only: bool,
+        #[arg(long, help = "Show all servers including STDIO-only (not compatible with mcp-connect)")]
+        show_all: bool,
     },
 
     /// Show detailed information about a specific server
@@ -92,10 +92,10 @@ enum RegistryCommands {
         registry_path: String,
     },
 
-    /// List all servers in the registry
+    /// List all servers in the registry (only shows remote-compatible servers)
     List {
-        #[arg(long, help = "Only show servers with remote (HTTP) transport")]
-        remote_only: bool,
+        #[arg(long, help = "Show all servers including STDIO-only (not compatible with mcp-connect)")]
+        show_all: bool,
     },
 }
 
@@ -635,14 +635,14 @@ async fn main() -> Result<()> {
 
         Commands::Registry { command } => {
             match command {
-                RegistryCommands::Search { query, remote_only } => {
-                    commands::registry::search(&query, remote_only).await
+                RegistryCommands::Search { query, show_all } => {
+                    commands::registry::search(&query, !show_all).await
                 }
                 RegistryCommands::Show { registry_path } => {
                     commands::registry::show(&registry_path).await
                 }
-                RegistryCommands::List { remote_only } => {
-                    commands::registry::list(remote_only).await
+                RegistryCommands::List { show_all } => {
+                    commands::registry::list(!show_all).await
                 }
             }
         }
