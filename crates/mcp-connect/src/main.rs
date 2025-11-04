@@ -30,23 +30,23 @@
 //! ## Commands
 //!
 //! - `init`: Initialize new configuration
-//! - `registry`: Search and browse MCP Registry
+//! - `registry`: Search and browse MCP Registry (supports custom registry sources)
 //! - `config`: Manage server configurations
 //! - `serve`: Run multiplexing server
-//! - `generate-config`: Generate IDE configurations
+//! - `generate`: Generate IDE configurations
 //! - `proxy`: Run as STDIO proxy (legacy)
 //! - `test`: Test connection to remote server
 //! - `load-balance`: Distribute requests across multiple servers
 
 mod commands;
+mod transport;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use mcp_client::{McpRemoteClient, transport::TransportConfig};
+use mcp_client::McpRemoteClient;
 use mcp_proxy::{stdio_proxy::StdioProxyBuilder, strategy::{ForwardingStrategy, LoadBalancingStrategy}};
 use mcp_types::{TransportType, McpClient, LogLevel};
 use serde_json::json;
-use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::Arc;
 use std::time::Duration;
@@ -84,18 +84,59 @@ enum RegistryCommands {
 
         #[arg(long, help = "Show all servers including STDIO-only (not compatible with mcp-connect)")]
         show_all: bool,
+
+        #[arg(long, help = "Registry source to use (from configured sources, or 'default' for official)")]
+        source: Option<String>,
     },
 
     /// Show detailed information about a specific server
     Show {
         /// Registry path (e.g., "modelcontextprotocol/github-mcp-server")
         registry_path: String,
+
+        #[arg(long, help = "Registry source to use (from configured sources, or 'default' for official)")]
+        source: Option<String>,
     },
 
     /// List all servers in the registry (only shows remote-compatible servers)
     List {
         #[arg(long, help = "Show all servers including STDIO-only (not compatible with mcp-connect)")]
         show_all: bool,
+
+        #[arg(long, help = "Registry source to use (from configured sources, or 'default' for official)")]
+        source: Option<String>,
+    },
+
+    /// Add a custom registry source
+    AddSource {
+        /// Name for the registry source
+        name: String,
+
+        /// Base URL of the registry (e.g., "https://registry.example.com")
+        #[arg(long)]
+        url: String,
+
+        /// API version (e.g., "v1", "v0.1"). If not specified, uses default.
+        #[arg(long)]
+        api_version: Option<String>,
+    },
+
+    /// List all configured registry sources
+    ListSources,
+
+    /// Remove a custom registry source
+    RemoveSource {
+        /// Registry source name to remove
+        name: String,
+
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
+
+    /// Set the default registry source to use
+    SetDefaultSource {
+        /// Registry source name (use "default" for official MCP registry)
+        name: String,
     },
 }
 
@@ -177,8 +218,8 @@ enum Commands {
     Serve,
 
     /// Generate IDE-specific configuration
-    GenerateConfig {
-        #[arg(long, help = "Target IDE (zed)")]
+    Generate {
+        #[arg(long, help = "Target IDE (zed, vscode, cursor)")]
         ide: String,
 
         #[arg(long, help = "Output path for generated config")]
@@ -276,66 +317,6 @@ enum Commands {
     },
 }
 
-fn parse_transport_type(transport: &str) -> Result<TransportType> {
-    match transport.to_lowercase().as_str() {
-        "http" => Ok(TransportType::Http),
-        "stdio" => Ok(TransportType::Stdio),
-        "tcp" => Ok(TransportType::Tcp),
-        _ => Err(anyhow::anyhow!("Unknown transport type: {}", transport)),
-    }
-}
-
-fn parse_fallback_transports(fallbacks: &[String]) -> Result<Vec<TransportType>> {
-    fallbacks.iter()
-        .map(|s| parse_transport_type(s))
-        .collect()
-}
-
-fn parse_headers(headers: Option<Vec<String>>) -> Result<HashMap<String, String>> {
-    let mut header_map = HashMap::new();
-
-    if let Some(headers) = headers {
-        for header in headers {
-            if let Some((key, value)) = header.split_once(':') {
-                header_map.insert(key.trim().to_string(), value.trim().to_string());
-            } else {
-                return Err(anyhow::anyhow!("Invalid header format '{}'. Expected 'key:value'", header));
-            }
-        }
-    }
-
-    Ok(header_map)
-}
-
-fn build_transport_config(
-    endpoint: String,
-    timeout: u64,
-    retry_attempts: u32,
-    retry_delay: u64,
-    headers: Option<Vec<String>>,
-    auth_token: Option<String>,
-    api_key: Option<String>,
-    user_agent: Option<String>,
-) -> Result<TransportConfig> {
-    let mut config = TransportConfig {
-        endpoint,
-        timeout: Duration::from_secs(timeout),
-        retry_attempts,
-        retry_delay: Duration::from_millis(retry_delay),
-        headers: parse_headers(headers)?,
-        auth_token: None,
-        user_agent,
-    };
-
-    // Handle authentication
-    if let Some(token) = auth_token {
-        config = config.with_bearer_token(token);
-    } else if let Some(key) = api_key {
-        config = config.with_api_key("X-API-Key".to_string(), key);
-    }
-
-    Ok(config)
-}
 
 // Simple function to send MCP notifications to STDOUT
 fn send_mcp_notification(level: LogLevel, message: &str) {
@@ -476,7 +457,7 @@ async fn run_proxy(
     send_mcp_notification(LogLevel::Info, &format!("MCP Proxy starting with endpoint: {}", endpoint));
 
     let fallback_transports = if let Some(fallbacks) = fallbacks {
-        parse_fallback_transports(&fallbacks)?
+        transport::parse_fallback_transports(&fallbacks)?
     } else {
         vec![TransportType::Stdio, TransportType::Tcp]
     };
@@ -484,7 +465,7 @@ async fn run_proxy(
     info!("Fallback transports: {:?}", fallback_transports);
 
     // Build primary transport config with headers
-    let primary_config = build_transport_config(
+    let primary_config = transport::build_transport_config(
         endpoint.clone(),
         timeout,
         retry_attempts,
@@ -528,11 +509,11 @@ async fn run_load_balance(
     info!("Endpoints: {:?}", endpoints);
     info!("Transport: {}", transport);
 
-    let transport_type = parse_transport_type(&transport)?;
+    let transport_type = transport::parse_transport_type(&transport)?;
     let mut clients = Vec::new();
 
     for endpoint in endpoints {
-        let config = build_transport_config(
+        let config = transport::build_transport_config(
             endpoint.clone(),
             timeout,
             retry_attempts,
@@ -578,8 +559,8 @@ async fn test_connection(
     info!("Testing connection to: {}", endpoint);
     info!("Transport: {}", transport);
 
-    let transport_type = parse_transport_type(&transport)?;
-    let config = build_transport_config(
+    let transport_type = transport::parse_transport_type(&transport)?;
+    let config = transport::build_transport_config(
         endpoint.clone(),
         timeout,
         1, // retry_attempts
@@ -635,14 +616,26 @@ async fn main() -> Result<()> {
 
         Commands::Registry { command } => {
             match command {
-                RegistryCommands::Search { query, show_all } => {
-                    commands::registry::search(&query, !show_all).await
+                RegistryCommands::Search { query, show_all, source } => {
+                    commands::registry::search(&query, !show_all, source.as_deref()).await
                 }
-                RegistryCommands::Show { registry_path } => {
-                    commands::registry::show(&registry_path).await
+                RegistryCommands::Show { registry_path, source } => {
+                    commands::registry::show(&registry_path, source.as_deref()).await
                 }
-                RegistryCommands::List { show_all } => {
-                    commands::registry::list(!show_all).await
+                RegistryCommands::List { show_all, source } => {
+                    commands::registry::list(!show_all, source.as_deref()).await
+                }
+                RegistryCommands::AddSource { name, url, api_version } => {
+                    commands::registry::add_source(&name, &url, api_version.as_deref()).await
+                }
+                RegistryCommands::ListSources => {
+                    commands::registry::list_sources()
+                }
+                RegistryCommands::RemoveSource { name, force } => {
+                    commands::registry::remove_source(&name, force).await
+                }
+                RegistryCommands::SetDefaultSource { name } => {
+                    commands::registry::set_default_source(&name).await
                 }
             }
         }
@@ -681,7 +674,7 @@ async fn main() -> Result<()> {
             commands::serve::serve(cli.debug).await
         }
 
-        Commands::GenerateConfig { ide, output } => {
+        Commands::Generate { ide, output } => {
             use std::str::FromStr;
             let ide_type = commands::generate::IdeType::from_str(&ide)?;
             commands::generate::generate(ide_type, output)

@@ -7,6 +7,7 @@ use mcp_client::McpRemoteClient;
 use mcp_config::ConfigManager;
 use mcp_proxy::stdio_proxy::StdioProxyBuilder;
 use mcp_types::{ConnectConfig, McpClient};
+use rmcp::model::{Implementation, InitializeResult, ProtocolVersion, ServerCapabilities};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -101,8 +102,8 @@ impl MultiplexingStrategy {
     /// Route a request to the appropriate server based on namespace.
     async fn route_request(&self, request: &str) -> Result<Option<String>> {
         // Parse the JSON-RPC request
-        let request_json: serde_json::Value = serde_json::from_str(request)
-            .context("Failed to parse request")?;
+        let request_json: serde_json::Value =
+            serde_json::from_str(request).context("Failed to parse request")?;
 
         // Check if this is a tools/list, resources/list, or prompts/list request
         if let Some(method) = request_json["method"].as_str() {
@@ -148,11 +149,12 @@ impl MultiplexingStrategy {
                                 if let Some(name) = tool_obj.get("name").and_then(|n| n.as_str()) {
                                     let prefixed_name = format!(
                                         "{}{}{}",
-                                        server_name,
-                                        self.routing_config.separator,
-                                        name
+                                        server_name, self.routing_config.separator, name
                                     );
-                                    tool_obj.insert("name".to_string(), serde_json::json!(prefixed_name));
+                                    tool_obj.insert(
+                                        "name".to_string(),
+                                        serde_json::json!(prefixed_name),
+                                    );
                                 }
                             }
 
@@ -198,14 +200,14 @@ impl MultiplexingStrategy {
                             let mut prefixed_resource = resource.clone();
 
                             if let Some(resource_obj) = prefixed_resource.as_object_mut() {
-                                if let Some(uri) = resource_obj.get("uri").and_then(|u| u.as_str()) {
+                                if let Some(uri) = resource_obj.get("uri").and_then(|u| u.as_str())
+                                {
                                     let prefixed_uri = format!(
                                         "{}{}{}",
-                                        server_name,
-                                        self.routing_config.separator,
-                                        uri
+                                        server_name, self.routing_config.separator, uri
                                     );
-                                    resource_obj.insert("uri".to_string(), serde_json::json!(prefixed_uri));
+                                    resource_obj
+                                        .insert("uri".to_string(), serde_json::json!(prefixed_uri));
                                 }
                             }
 
@@ -230,7 +232,6 @@ impl MultiplexingStrategy {
         Ok(serde_json::to_string(&response)?)
     }
 
-
     /// Route a tool call to the appropriate server.
     async fn route_tool_call(&self, request: serde_json::Value) -> Result<String> {
         let tool_name = request["params"]["name"]
@@ -240,7 +241,8 @@ impl MultiplexingStrategy {
         let (server_name, actual_tool_name) = self.split_namespace(tool_name)?;
 
         // Get the client for this server
-        let client = self.clients
+        let client = self
+            .clients
             .get(server_name)
             .context(format!("Server '{}' not found", server_name))?;
 
@@ -265,7 +267,8 @@ impl MultiplexingStrategy {
 
         let (server_name, actual_uri) = self.split_namespace(uri)?;
 
-        let client = self.clients
+        let client = self
+            .clients
             .get(server_name)
             .context(format!("Server '{}' not found", server_name))?;
 
@@ -283,9 +286,116 @@ impl MultiplexingStrategy {
 
     /// Handle initialize request - forward to all servers and merge capabilities.
     async fn handle_initialize(&self, request: serde_json::Value) -> Result<String> {
-        // For now, just forward to the first server
-        // TODO: Properly aggregate capabilities from all servers
-        self.forward_to_any(&serde_json::to_string(&request)?).await
+        let request_id = request
+            .get("id")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
+
+        // Initialize all servers and collect their capabilities
+        let mut init_results = Vec::new();
+        let mut server_infos = Vec::new();
+
+        for (server_name, client) in &self.clients {
+            let mut client_guard = client.lock().await;
+
+            // Connect and initialize each server
+            if let Err(e) = client_guard.connect().await {
+                warn!(
+                    "Failed to connect to server '{}' during initialize: {}",
+                    server_name, e
+                );
+                continue;
+            }
+
+            match client_guard.initialize().await {
+                Ok(init_result) => {
+                    info!("Initialized server '{}' with capabilities", server_name);
+                    init_results.push((server_name.clone(), init_result));
+                }
+                Err(e) => {
+                    warn!("Failed to initialize server '{}': {}", server_name, e);
+                }
+            }
+        }
+
+        if init_results.is_empty() {
+            anyhow::bail!("No servers could be initialized");
+        }
+
+        // Extract server info from all results
+        for (_server_name, init_result) in &init_results {
+            server_infos.push(format!(
+                "{} v{}",
+                init_result.server_info.name, init_result.server_info.version
+            ));
+        }
+
+        // Build merged capabilities
+        // The builder pattern uses type-level state, so we can't conditionally build.
+        // Since we're aggregating multiple servers, we'll enable all common capabilities
+        // that are typically supported. This ensures the client knows what's available.
+        // The actual capabilities are determined by what servers we can connect to.
+        let merged_capabilities = ServerCapabilities::builder()
+            .enable_logging() // Most servers support logging
+            .enable_tools() // Most servers support tools
+            .enable_resources() // Most servers support resources
+            .build();
+
+        // Create merged server info
+        let merged_server_info = Implementation {
+            name: "mcp-connect".to_string(),
+            version: "0.1.0".to_string(),
+            title: Some(format!(
+                "MCP Connect Multiplexer ({} server(s))",
+                init_results.len()
+            )),
+            icons: None,
+            website_url: None,
+        };
+
+        // Combine instructions from all servers
+        let mut instructions_parts = vec![format!(
+            "MCP Connect multiplexing {} server(s): {}",
+            init_results.len(),
+            server_infos.join(", ")
+        )];
+
+        for (_, init_result) in &init_results {
+            if let Some(instructions) = &init_result.instructions {
+                if !instructions.trim().is_empty() {
+                    instructions_parts.push(instructions.clone());
+                }
+            }
+        }
+
+        let merged_instructions = if instructions_parts.len() > 1 {
+            Some(instructions_parts.join("\n\n"))
+        } else {
+            instructions_parts.first().cloned()
+        };
+
+        // Use the protocol version from the first server (they should all be the same)
+        let protocol_version = init_results
+            .first()
+            .map(|(_, r)| r.protocol_version.clone())
+            .unwrap_or_else(ProtocolVersion::default);
+
+        // Build the merged initialize result
+        let merged_result = InitializeResult {
+            protocol_version,
+            capabilities: merged_capabilities,
+            server_info: merged_server_info,
+            instructions: merged_instructions,
+        };
+
+        // Build response
+        let response = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": merged_result
+        });
+
+        Ok(serde_json::to_string(&response)?)
     }
 
     /// Forward request to any available server (used for initialize, ping, etc.).
@@ -297,7 +407,9 @@ impl MultiplexingStrategy {
             match client_guard.connect().await {
                 Ok(_) => {
                     info!("Forwarding request to server: {}", name);
-                    return client_guard.send_request(request).await
+                    return client_guard
+                        .send_request(request)
+                        .await
                         .map_err(|e| anyhow::anyhow!("Request failed: {}", e));
                 }
                 Err(e) => {
@@ -312,7 +424,9 @@ impl MultiplexingStrategy {
 
     /// Split a namespaced identifier into (server_name, actual_name).
     fn split_namespace<'a>(&self, identifier: &'a str) -> Result<(&'a str, &'a str)> {
-        let parts: Vec<&str> = identifier.splitn(2, &self.routing_config.separator).collect();
+        let parts: Vec<&str> = identifier
+            .splitn(2, &self.routing_config.separator)
+            .collect();
 
         if parts.len() != 2 {
             anyhow::bail!(

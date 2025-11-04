@@ -413,6 +413,14 @@ pub struct ConnectConfig {
     /// Routing configuration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub routing: Option<RoutingConfig>,
+
+    /// Custom registries configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registries: Option<HashMap<String, RegistryConfig>>,
+
+    /// Default registry to use (name from registries map, or "default" for official registry)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_registry: Option<String>,
 }
 
 impl Default for ConnectConfig {
@@ -423,6 +431,8 @@ impl Default for ConnectConfig {
             env_file: Some(".env".to_string()),
             servers: HashMap::new(),
             routing: Some(RoutingConfig::default()),
+            registries: None,
+            default_registry: None,
         }
     }
 }
@@ -590,4 +600,29 @@ impl Default for RoutingConfig {
 pub enum RoutingMethod {
     /// Prefix tool names with server name (e.g., "github/search_code")
     NamespacePrefix,
+}
+
+/// Configuration for a custom MCP registry.
+///
+/// Allows users to configure additional registries beyond the official one.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::RegistryConfig;
+///
+/// let config = RegistryConfig {
+///     base_url: "https://my-registry.example.com".to_string(),
+///     api_version: Some("v1".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegistryConfig {
+    /// Base URL of the registry (e.g., "https://registry.example.com")
+    #[serde(rename = "baseUrl")]
+    pub base_url: String,
+
+    /// API version path (e.g., "v1", "v0.1"). If None, uses default version.
+    #[serde(rename = "apiVersion", skip_serializing_if = "Option::is_none")]
+    pub api_version: Option<String>,
 }

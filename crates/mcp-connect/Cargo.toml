@@ -27,3 +27,4 @@ futures = { workspace = true }
 reqwest = { workspace = true }
 inquire = "0.7"
 async-trait = { workspace = true }
+rmcp = { workspace = true }

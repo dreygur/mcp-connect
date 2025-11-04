@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "mcp-connect": {
+      "command": "./target/release/mcp-connect",
+      "args": [
+        "serve"
+      ]
+    }
+  }
+}

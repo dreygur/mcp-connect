@@ -21,16 +21,31 @@ pub struct RegistryClient {
 }
 
 impl RegistryClient {
-    /// Create a new registry client with default settings.
+    /// Create a new registry client with default settings (official MCP registry).
     pub fn new() -> Result<Self> {
+        Self::with_base_url(REGISTRY_BASE_URL, Some(API_VERSION))
+    }
+
+    /// Create a new registry client with a custom base URL.
+    ///
+    /// # Arguments
+    /// * `base_url` - The base URL of the registry (e.g., "https://registry.example.com")
+    /// * `api_version` - Optional API version path (e.g., "v1", "v0.1"). If None, uses default.
+    pub fn with_base_url(base_url: &str, api_version: Option<&str>) -> Result<Self> {
         let client = reqwest::Client::builder()
             .user_agent("mcp-connect/0.1.0")
             .build()
             .context("Failed to create HTTP client")?;
 
+        let base_url = if let Some(version) = api_version {
+            format!("{}/{}", base_url.trim_end_matches('/'), version)
+        } else {
+            base_url.trim_end_matches('/').to_string()
+        };
+
         Ok(Self {
             client,
-            base_url: format!("{}/{}", REGISTRY_BASE_URL, API_VERSION),
+            base_url,
         })
     }
 
