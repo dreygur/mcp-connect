@@ -13,6 +13,8 @@ mcp-types = { path = "../mcp-types" }
 mcp-server = { path = "../mcp-server" }
 mcp-client = { path = "../mcp-client" }
 mcp-proxy = { path = "../mcp-proxy" }
+mcp-registry = { path = "../mcp-registry" }
+mcp-config = { path = "../mcp-config" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -22,3 +24,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-core = { workspace = true }
 futures = { workspace = true }
+reqwest = { workspace = true }
+inquire = "0.7"
+async-trait = { workspace = true }

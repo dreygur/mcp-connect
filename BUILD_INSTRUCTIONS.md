@@ -1,6 +1,6 @@
-# MCP Remote Proxy - Build Instructions
+# mcp-connect - Build Instructions
 
-This document provides comprehensive instructions for building standalone release binaries of the MCP Remote Proxy.
+This document provides comprehensive instructions for building standalone release binaries of mcp-connect.
 
 ## Prerequisites
 
@@ -194,8 +194,14 @@ upx --best target/release/mcp-connect
 # Test help output
 ./mcp-connect --help
 
-# Test basic functionality
-./mcp-connect test --endpoint "https://httpbin.org/post" --timeout 5
+# Test initialization
+./mcp-connect init --force
+
+# Test registry commands
+./mcp-connect registry search github
+
+# Test basic proxy functionality (legacy mode)
+./mcp-connect proxy --endpoint "https://httpbin.org/post" --timeout 5 --debug
 ```
 
 ### Check Dependencies
@@ -236,11 +242,18 @@ cp LICENSE dist/ # if available
 
 # Create usage guide
 cat > dist/USAGE.txt << 'EOF'
-Quick Start Guide for MCP Remote Proxy
+Quick Start Guide for mcp-connect
 
-1. Test version: ./mcp-connect --version
-2. Get help: ./mcp-connect --help
-3. Run proxy: ./mcp-connect proxy --endpoint "URL" --auth-token "TOKEN"
+1. Initialize project: ./mcp-connect init
+2. Add servers: ./mcp-connect config add <name> <registry-path>
+3. Configure credentials in .env file
+4. Generate IDE config: ./mcp-connect generate-config --ide zed
+5. Start server: ./mcp-connect serve
+
+For legacy single-server proxy:
+./mcp-connect proxy --endpoint "URL" --headers "Authorization: Bearer TOKEN"
+
+Get help: ./mcp-connect --help
 EOF
 
 # Create tarball

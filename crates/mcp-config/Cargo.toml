@@ -1,0 +1,14 @@
+[package]
+name = "mcp-config"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rakibul Yeasin <ryeasin03@gmail.com>"]
+
+[dependencies]
+mcp-types = { path = "../mcp-types" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+dotenvy = "0.15"
+regex = "1.11"

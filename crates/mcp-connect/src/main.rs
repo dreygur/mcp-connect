@@ -7,30 +7,38 @@
 //! - Authentication handling (Bearer tokens, API keys, OAuth 2.1)
 //! - Fallback mechanisms and load balancing
 //! - Comprehensive logging and debugging
+//! - Central configuration management
+//! - MCP Registry integration
 //!
 //! ## Usage
 //!
-//! Basic proxy operation:
+//! Initialize new project:
 //! ```bash
-//! mcp-connect proxy --endpoint "https://api.example.com/mcp" --auth-token "your-token"
+//! mcp-connect init
 //! ```
 //!
-//! With fallbacks:
+//! Add servers from registry:
 //! ```bash
-//! mcp-connect proxy --endpoint "https://api.example.com/mcp" --fallbacks "stdio,tcp"
+//! mcp-connect config add github modelcontextprotocol/github-mcp-server
 //! ```
 //!
-//! Load balancing:
+//! Start multiplexing server:
 //! ```bash
-//! mcp-connect load-balance --endpoints "server1,server2,server3" --transport "http"
+//! mcp-connect serve
 //! ```
 //!
 //! ## Commands
 //!
-//! - `proxy`: Run as STDIO proxy (main mode)
+//! - `init`: Initialize new configuration
+//! - `registry`: Search and browse MCP Registry
+//! - `config`: Manage server configurations
+//! - `serve`: Run multiplexing server
+//! - `generate-config`: Generate IDE configurations
+//! - `proxy`: Run as STDIO proxy (legacy)
 //! - `test`: Test connection to remote server
 //! - `load-balance`: Distribute requests across multiple servers
-//! - `notification-demo`: Test MCP notification system
+
+mod commands;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -68,8 +76,116 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum RegistryCommands {
+    /// Search for servers in the registry
+    Search {
+        /// Search query
+        query: String,
+
+        #[arg(long, help = "Only show servers with remote (HTTP) transport")]
+        remote_only: bool,
+    },
+
+    /// Show detailed information about a specific server
+    Show {
+        /// Registry path (e.g., "modelcontextprotocol/github-mcp-server")
+        registry_path: String,
+    },
+
+    /// List all servers in the registry
+    List {
+        #[arg(long, help = "Only show servers with remote (HTTP) transport")]
+        remote_only: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Add a new server to configuration
+    Add {
+        /// Local name for the server
+        name: String,
+
+        /// Registry path (optional, e.g., "modelcontextprotocol/github-mcp-server")
+        registry_path: Option<String>,
+
+        #[arg(long, help = "Add from GitHub registry URL")]
+        from_url: Option<String>,
+
+        #[arg(long, help = "Interactive search mode")]
+        search: bool,
+
+        #[arg(long, help = "Custom server URL (for non-registry servers)")]
+        url: Option<String>,
+
+        #[arg(long, help = "Authorization header value")]
+        auth_header: Option<String>,
+    },
+
+    /// List all configured servers
+    List,
+
+    /// Show details of a specific server
+    Show {
+        /// Server name
+        name: String,
+    },
+
+    /// Remove a server from configuration
+    Remove {
+        /// Server name
+        name: String,
+
+        #[arg(long, help = "Skip confirmation prompt")]
+        force: bool,
+    },
+
+    /// Test connectivity to server(s)
+    Test {
+        /// Server name (optional, omit to use --all)
+        name: Option<String>,
+
+        #[arg(long, help = "Test all configured servers")]
+        all: bool,
+    },
+
+    /// Validate configuration file
+    Validate,
+}
+
+#[derive(Subcommand)]
 enum Commands {
-    /// Run as a proxy server (STDIO mode)
+    /// Initialize new mcp-connect configuration
+    Init {
+        #[arg(long, help = "Overwrite existing configuration")]
+        force: bool,
+    },
+
+    /// Search and browse the MCP Registry
+    Registry {
+        #[command(subcommand)]
+        command: RegistryCommands,
+    },
+
+    /// Manage server configurations
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+
+    /// Start multiplexing server (serves all configured servers)
+    Serve,
+
+    /// Generate IDE-specific configuration
+    GenerateConfig {
+        #[arg(long, help = "Target IDE (zed)")]
+        ide: String,
+
+        #[arg(long, help = "Output path for generated config")]
+        output: Option<String>,
+    },
+
+    /// Run as a proxy server (STDIO mode) - LEGACY
     Proxy {
         #[arg(long, help = "Primary remote server endpoint")]
         endpoint: String,
@@ -513,6 +629,64 @@ async fn main() -> Result<()> {
     setup_logging(cli.debug, cli.log_level)?;
 
     let result = match cli.command {
+        Commands::Init { force } => {
+            commands::init::init(force)
+        }
+
+        Commands::Registry { command } => {
+            match command {
+                RegistryCommands::Search { query, remote_only } => {
+                    commands::registry::search(&query, remote_only).await
+                }
+                RegistryCommands::Show { registry_path } => {
+                    commands::registry::show(&registry_path).await
+                }
+                RegistryCommands::List { remote_only } => {
+                    commands::registry::list(remote_only).await
+                }
+            }
+        }
+
+        Commands::Config { command } => {
+            match command {
+                ConfigCommands::Add {
+                    name,
+                    registry_path,
+                    from_url,
+                    search,
+                    url,
+                    auth_header,
+                } => {
+                    commands::config::add(name, registry_path, from_url, search, url, auth_header).await
+                }
+                ConfigCommands::List => {
+                    commands::config::list()
+                }
+                ConfigCommands::Show { name } => {
+                    commands::config::show(&name)
+                }
+                ConfigCommands::Remove { name, force } => {
+                    commands::config::remove(&name, force)
+                }
+                ConfigCommands::Test { name, all } => {
+                    commands::config::test(name, all).await
+                }
+                ConfigCommands::Validate => {
+                    commands::config::validate()
+                }
+            }
+        }
+
+        Commands::Serve => {
+            commands::serve::serve(cli.debug).await
+        }
+
+        Commands::GenerateConfig { ide, output } => {
+            use std::str::FromStr;
+            let ide_type = commands::generate::IdeType::from_str(&ide)?;
+            commands::generate::generate(ide_type, output)
+        }
+
         Commands::Proxy {
             endpoint,
             fallbacks,

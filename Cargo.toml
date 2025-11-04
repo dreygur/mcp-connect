@@ -4,6 +4,8 @@ members = [
     "crates/mcp-server",
     "crates/mcp-client",
     "crates/mcp-proxy",
+    "crates/mcp-registry",
+    "crates/mcp-config",
     "crates/mcp-connect"
 ]
 resolver = "2"

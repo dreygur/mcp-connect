@@ -28,6 +28,7 @@
 //! ```
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use thiserror::Error;
 
 /// Comprehensive error type for all MCP operations.
@@ -372,4 +373,221 @@ pub trait McpClient: Send + Sync {
     /// # Errors
     /// Returns [`McpError`] if disconnection cannot complete cleanly.
     async fn disconnect(&mut self) -> Result<()>;
+}
+
+/// Central configuration file structure for mcp-connect.
+///
+/// This structure represents the `.mcp-connect.json` file that contains
+/// all remote MCP server configurations.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::ConnectConfig;
+/// use std::collections::HashMap;
+///
+/// let config = ConnectConfig {
+///     schema: Some("https://static.modelcontextprotocol.io/schemas/2025-10-17/mcp-connect-config.schema.json".to_string()),
+///     version: "1.0".to_string(),
+///     env_file: Some(".env".to_string()),
+///     servers: HashMap::new(),
+///     routing: None,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConnectConfig {
+    /// JSON schema URL for validation
+    #[serde(rename = "$schema", skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
+
+    /// Config file format version
+    pub version: String,
+
+    /// Path to .env file for environment variable substitution
+    #[serde(rename = "envFile", skip_serializing_if = "Option::is_none")]
+    pub env_file: Option<String>,
+
+    /// Map of server name to server configuration
+    pub servers: HashMap<String, ServerConfig>,
+
+    /// Routing configuration
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub routing: Option<RoutingConfig>,
+}
+
+impl Default for ConnectConfig {
+    fn default() -> Self {
+        Self {
+            schema: Some("https://static.modelcontextprotocol.io/schemas/2025-10-17/mcp-connect-config.schema.json".to_string()),
+            version: "1.0".to_string(),
+            env_file: Some(".env".to_string()),
+            servers: HashMap::new(),
+            routing: Some(RoutingConfig::default()),
+        }
+    }
+}
+
+/// Configuration for a single remote MCP server.
+///
+/// Contains all the information needed to connect to and communicate
+/// with a remote MCP server.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::{ServerConfig, RemoteConfig, RemoteTransportType, KeyValue};
+///
+/// let config = ServerConfig {
+///     name: Some("io.github.modelcontextprotocol/github-mcp-server".to_string()),
+///     description: Some("GitHub repository management".to_string()),
+///     version: Some("latest".to_string()),
+///     remote: RemoteConfig {
+///         transport_type: RemoteTransportType::StreamableHttp,
+///         url: "https://api.github.com/mcp".to_string(),
+///         headers: Some(vec![KeyValue {
+///             key: "Authorization".to_string(),
+///             value: "Bearer ${GITHUB_TOKEN}".to_string(),
+///         }]),
+///     },
+///     timeout: Some(30),
+///     retry_attempts: Some(3),
+///     fallbacks: None,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// Registry name (e.g., "io.github.modelcontextprotocol/github-mcp-server")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+
+    /// Human-readable description
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+
+    /// Version from registry (typically "latest")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+
+    /// Remote transport configuration
+    pub remote: RemoteConfig,
+
+    /// Connection timeout in seconds
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+
+    /// Number of retry attempts
+    #[serde(rename = "retryAttempts", skip_serializing_if = "Option::is_none")]
+    pub retry_attempts: Option<u32>,
+
+    /// Fallback transport types if primary fails
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallbacks: Option<Vec<String>>,
+}
+
+/// Remote transport configuration matching MCP registry schema.
+///
+/// Defines how to connect to a remote MCP server using HTTP-based transports.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::{RemoteConfig, RemoteTransportType, KeyValue};
+///
+/// let config = RemoteConfig {
+///     transport_type: RemoteTransportType::StreamableHttp,
+///     url: "https://api.example.com/mcp".to_string(),
+///     headers: Some(vec![KeyValue {
+///         key: "Authorization".to_string(),
+///         value: "Bearer ${API_TOKEN}".to_string(),
+///     }]),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteConfig {
+    /// Transport type (streamable-http or sse)
+    #[serde(rename = "type")]
+    pub transport_type: RemoteTransportType,
+
+    /// Remote server URL
+    pub url: String,
+
+    /// HTTP headers for authentication and customization
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub headers: Option<Vec<KeyValue>>,
+}
+
+/// Remote transport types supported by the MCP registry.
+///
+/// These transport types are defined in the official MCP server schema
+/// and used for connecting to remote servers over HTTP-based protocols.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RemoteTransportType {
+    /// Streamable HTTP transport for bidirectional communication
+    StreamableHttp,
+    /// Server-Sent Events transport
+    Sse,
+}
+
+/// Key-value pair for HTTP headers.
+///
+/// Used in remote configurations to specify headers like authentication tokens.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::KeyValue;
+///
+/// let auth_header = KeyValue {
+///     key: "Authorization".to_string(),
+///     value: "Bearer ${TOKEN}".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyValue {
+    /// Header name (e.g., "Authorization")
+    pub key: String,
+    /// Header value with optional env var substitution (e.g., "Bearer ${TOKEN}")
+    pub value: String,
+}
+
+/// Routing configuration for multiplexing multiple servers.
+///
+/// Controls how tool/resource names are mapped to specific servers.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::{RoutingConfig, RoutingMethod};
+///
+/// let config = RoutingConfig {
+///     method: RoutingMethod::NamespacePrefix,
+///     separator: "/".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RoutingConfig {
+    /// Routing method to use
+    pub method: RoutingMethod,
+    /// Separator character for namespace prefixing
+    pub separator: String,
+}
+
+impl Default for RoutingConfig {
+    fn default() -> Self {
+        Self {
+            method: RoutingMethod::NamespacePrefix,
+            separator: "/".to_string(),
+        }
+    }
+}
+
+/// Routing methods for multiplexing servers.
+///
+/// Defines how tools/resources from multiple servers are distinguished.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum RoutingMethod {
+    /// Prefix tool names with server name (e.g., "github/search_code")
+    NamespacePrefix,
 }

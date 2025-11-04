@@ -10,6 +10,10 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 .
 ├── Cargo.toml                  # Workspace configuration
 ├── crates/
+│   ├── mcp-types/             # Shared types
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       └── lib.rs         # Common types and traits
 │   ├── mcp-server/            # MCP Server implementation
 │   │   ├── Cargo.toml
 │   │   └── src/
@@ -32,14 +36,25 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 │   │       ├── stdio_proxy.rs # STDIO-specific proxy
 │   │       ├── strategy.rs    # Proxy strategy patterns
 │   │       └── error.rs       # Error types
-│   ├── mcp-types/             # Shared types
+│   ├── mcp-registry/          # MCP Registry API client
 │   │   ├── Cargo.toml
 │   │   └── src/
-│   │       └── lib.rs         # Common types and traits
-│   └── mcp-connect/            # Remote proxy executable
+│   │       └── lib.rs         # Registry search and fetch
+│   ├── mcp-config/            # Configuration management
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       └── lib.rs         # Config loading and env vars
+│   └── mcp-connect/           # CLI application
 │       ├── Cargo.toml
 │       └── src/
-│           └── main.rs        # CLI application
+│           ├── main.rs        # CLI entry point
+│           └── commands/      # Command implementations
+│               ├── mod.rs
+│               ├── init.rs
+│               ├── registry.rs
+│               ├── config.rs
+│               ├── serve.rs
+│               └── generate.rs
 └── examples/
     ├── simple_usage.md
     └── minimal_server_test.rs
@@ -126,38 +141,133 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 
 - **Error Types**: Unified error handling across crates
 - **Traits**: Common interfaces for servers, clients, and proxies
-- **Configuration**: Shared configuration structures
+- **Configuration**: Shared configuration structures (ConnectConfig, ServerConfig, etc.)
 
-### 5. Remote Proxy Executable (`mcp-connect`)
+**Dependencies:**
+
+- `serde` for serialization
+- `serde_json` for JSON handling
+- `async-trait` for async traits
+
+### 5. MCP Registry (`mcp-registry`)
 
 **Responsibilities:**
 
-- CLI application that ties everything together
-- Configure and run the proxy with specified parameters
+- Search and browse the official MCP Registry
+- Fetch server details and metadata
+- Convert registry format to internal configuration
 
 **Key Features:**
 
-- **CLI Interface**: Command-line configuration
-- **Transport Selection**: Choose primary and fallback transports
-- **Logging Configuration**: Configure debug and notification logging
+- **Registry Search**: Search for servers by keyword
+- **Server Details**: Fetch full server metadata including transports
+- **Remote Filtering**: Identify servers with HTTP/HTTPS support
+- **Format Conversion**: Convert registry server.json format to internal RemoteConfig
+
+**Dependencies:**
+
+- `mcp-types` for shared types
+- `reqwest` for HTTP client
+- `serde_json` for JSON parsing
+- `urlencoding` for URL encoding
+
+### 6. Configuration Management (`mcp-config`)
+
+**Responsibilities:**
+
+- Load and save `.mcp-connect.json` configuration files
+- Manage environment variable substitution
+- Validate configuration structure
+
+**Key Features:**
+
+- **Config Loading**: Parse and validate `.mcp-connect.json`
+- **Environment Variables**: Load `.env` files and substitute `${VAR}` placeholders
+- **Config Initialization**: Create default configuration files
+- **Validation**: Ensure configuration integrity
+
+**Dependencies:**
+
+- `mcp-types` for shared types
+- `dotenvy` for .env file loading
+- `regex` for environment variable substitution
+- `serde_json` for JSON handling
+
+### 7. CLI Application (`mcp-connect`)
+
+**Responsibilities:**
+
+- Command-line interface for all mcp-connect operations
+- Orchestrate registry, config, and server components
+- Generate IDE-specific configuration files
+
+**Key Features:**
+
+- **Initialization**: `init` command to create configuration files
+- **Registry Commands**: Browse and search MCP Registry
+- **Config Commands**: Add, list, remove, test servers
+- **Multiplexing Server**: `serve` command runs multiplexing proxy
+- **IDE Integration**: `generate-config` creates IDE-specific configs
+- **Legacy Proxy**: Direct proxy mode for single servers
+
+**Commands:**
+
+- `init` - Initialize project with config files
+- `registry search/show/list` - Browse MCP Registry
+- `config add/list/show/remove/test/validate` - Manage servers
+- `serve` - Start multiplexing server
+- `generate-config` - Generate IDE configs
+- `proxy` (legacy) - Direct proxy to single server
+- `load-balance` (legacy) - Load balance across servers
+
+**Dependencies:**
+
+- All internal crates (mcp-server, mcp-client, mcp-proxy, mcp-registry, mcp-config)
+- `clap` for CLI argument parsing
+- `tokio` for async runtime
+- `tracing` for logging
 
 ## Protocol Flow
+
+### Direct Proxy Mode (Legacy)
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   MCP Client    │◄──►│   MCP Proxy     │◄──►│  Remote MCP     │
-│   (Local)       │    │                 │    │   Server        │
+│   (IDE/Agent)   │    │                 │    │   Server        │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
         │                       │                       │
         │ STDIO/JSON-RPC         │ HTTPStream            │
-        │                       │ (primary)             │
-        │                       │ STDIO/TCP             │
-        │                       │ (fallbacks)           │
         │                       │                       │
-   ┌────▼────┐              ┌───▼───┐              ┌────▼────┐
+   ┌────▼────┐              ┢───▼───┐              ┌────▼────┐
    │ stdin/  │              │Network│              │ Remote  │
    │ stdout  │              │Transpt│              │ Service │
    └─────────┘              └───────┘              └─────────┘
+```
+
+### Multiplexing Mode (New)
+
+```
+┌──────────────┐         ┌────────────────────┐
+│  IDE/Agent   │◄───────►│  mcp-connect serve │
+│              │  STDIO  │  (Multiplexer)     │
+└──────────────┘         └────────┬───────────┘
+                                  │
+                    ┌─────────────┼─────────────┐
+                    │             │             │
+                    │ HTTPStream  │ HTTPStream  │
+                    ▼             ▼             ▼
+           ┌────────────┐ ┌────────────┐ ┌────────────┐
+           │  GitHub    │ │ Context7   │ │  Custom    │
+           │  Server    │ │  Server    │ │  Server    │
+           └────────────┘ └────────────┘ └────────────┘
+
+Namespace Routing:
+• github/search_code → GitHub Server
+• context7/search_docs → Context7 Server
+• custom/my_tool → Custom Server
+
+Tools/Resources aggregated from all servers
 ```
 
 ## Implementation Strategy
@@ -180,16 +290,41 @@ This project implements a Model Context Protocol (MCP) system using the rmcp Rus
 2. Implement bidirectional communication
 3. Add error handling and session management
 
-### Phase 4: Integration and Testing
+### Phase 4: Basic CLI Integration
 
 1. Create `mcp-connect` CLI application
-2. Add comprehensive testing
-3. Create usage examples
+2. Implement direct proxy mode
+3. Add load balancing support
+
+### Phase 5: Registry and Configuration (Completed)
+
+1. Create `mcp-registry` crate for MCP Registry API
+2. Create `mcp-config` crate for configuration management
+3. Extend `mcp-types` with configuration structures
+4. Implement environment variable substitution
+
+### Phase 6: Centralized Configuration (Completed)
+
+1. Implement `init` command for project initialization
+2. Add registry commands (search, show, list)
+3. Add config commands (add, list, show, remove, test, validate)
+4. Implement IDE config generation
+
+### Phase 7: Multiplexing Server (Completed)
+
+1. Implement `serve` command with MultiplexingStrategy
+2. Add namespace routing for tools and resources
+3. Implement aggregation of capabilities from multiple servers
+4. Test with multiple concurrent servers
 
 ## Key Design Decisions
 
 1. **Async-First**: All components use async/await with tokio runtime
 2. **Error Handling**: Comprehensive error types with proper propagation
 3. **Transport Abstraction**: Clean interfaces allowing multiple transport implementations
-4. **Configuration-Driven**: Behavior controlled through CLI flags and configuration
+4. **Configuration-Driven**: Single `.mcp-connect.json` file for all servers
 5. **Protocol Compliance**: Strict adherence to MCP specification requirements
+6. **Namespace Routing**: Tool/resource names prefixed with server name for disambiguation
+7. **HTTP-Only Focus**: Only remote HTTP/HTTPS servers supported; STDIO servers configured directly in IDE
+8. **Environment Variables**: Secure credential management via `.env` files with `${VAR}` substitution
+9. **Modular Crates**: Each feature in separate crate for clean architecture
