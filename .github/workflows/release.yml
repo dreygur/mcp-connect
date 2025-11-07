@@ -2,6 +2,11 @@ name: 🦀 MCP-Connect Release
 
 on:
   workflow_dispatch: # Allow manual triggering from GitHub Actions UI
+    inputs:
+      tag:
+        description: "Release tag (e.g., v0.1.0). Leave empty to build only without creating a release."
+        required: false
+        type: string
   push:
     tags:
       - "v*" # Trigger on version tags like v0.1.0
@@ -55,7 +60,24 @@ jobs:
       - name: 🏗️ Build release binary
         run: cargo build --release --locked --target ${{ matrix.target }}
 
-      - name: 🗜️ Package binary and checksum
+      - name: 🗜️ Package binary and checksum (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $BIN = "mcp-connect"
+          $OUT_DIR = "dist"
+          $TARGET_DIR = "target/${{ matrix.target }}/release"
+          New-Item -ItemType Directory -Force -Path $OUT_DIR | Out-Null
+
+          Copy-Item "${TARGET_DIR}/${BIN}.exe" -Destination "."
+          Compress-Archive -Path "${BIN}.exe" -DestinationPath "${OUT_DIR}/${{ matrix.artifact }}" -Force
+
+          # Generate SHA256 checksum
+          $hash = Get-FileHash -Path "${OUT_DIR}/${{ matrix.artifact }}" -Algorithm SHA256
+          $hash.Hash.ToLower() | Out-File -FilePath "${OUT_DIR}/${{ matrix.artifact }}.sha256" -Encoding ASCII
+
+      - name: 🗜️ Package binary and checksum (Unix)
+        if: matrix.os != 'windows-latest'
         shell: bash
         run: |
           set -eux
@@ -64,22 +86,45 @@ jobs:
           TARGET_DIR="target/${{ matrix.target }}/release"
           mkdir -p "$OUT_DIR"
 
-          if [[ "${{ matrix.ext }}" == ".exe" ]]; then
-            cp "${TARGET_DIR}/${BIN}.exe" .
-            zip -j "${OUT_DIR}/${{ matrix.artifact }}" "${BIN}.exe"
-          else
-            tar -czvf "${OUT_DIR}/${{ matrix.artifact }}" -C "${TARGET_DIR}" "${BIN}"
-          fi
+          tar -czvf "${OUT_DIR}/${{ matrix.artifact }}" -C "${TARGET_DIR}" "${BIN}"
 
           # Generate SHA256 checksum
           cd "$OUT_DIR"
           shasum -a 256 "${{ matrix.artifact }}" > "${{ matrix.artifact }}.sha256"
 
+      - name: 📋 Determine release tag
+        id: release_tag
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            # Manual trigger: use input tag if provided
+            if [[ -n "${{ inputs.tag }}" ]]; then
+              echo "tag=${{ inputs.tag }}" >> $GITHUB_OUTPUT
+              echo "has_tag=true" >> $GITHUB_OUTPUT
+            else
+              echo "has_tag=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # Push event: use the tag from the ref
+            echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+            echo "has_tag=true" >> $GITHUB_OUTPUT
+          fi
+
       - name: 🚀 Publish to GitHub Release
+        if: steps.release_tag.outputs.has_tag == 'true'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release_tag.outputs.tag }}
           files: dist/*
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-rc') || contains(github.ref_name, '-beta') }}
+          prerelease: ${{ contains(steps.release_tag.outputs.tag, '-rc') || contains(steps.release_tag.outputs.tag, '-beta') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📦 Upload artifacts (build only)
+        if: steps.release_tag.outputs.has_tag != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}
+          retention-days: 7
