@@ -1,6 +1,7 @@
 name: 🦀 MCP-Connect Release
 
 on:
+  workflow_dispatch: # Allow manual triggering from GitHub Actions UI
   push:
     tags:
       - "v*" # Trigger on version tags like v0.1.0
