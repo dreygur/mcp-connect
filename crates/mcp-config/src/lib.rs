@@ -9,7 +9,17 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing::{debug, info, warn};
+
+/// Static regex for environment variable substitution (supports both upper and lowercase)
+fn env_var_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+            .expect("Invalid env var regex pattern")
+    })
+}
 
 /// Default configuration file name
 pub const DEFAULT_CONFIG_FILE: &str = ".mcp-connect.json";
@@ -137,17 +147,18 @@ impl ConfigManager {
     /// Substitute environment variables in configuration.
     ///
     /// Replaces ${VAR_NAME} patterns with actual environment variable values.
+    /// Supports both uppercase and lowercase variable names.
     fn substitute_env_vars(&self, config: &mut ConnectConfig) -> Result<()> {
-        let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}")?;
+        let re = env_var_regex();
 
         for server_config in config.servers.values_mut() {
             // Substitute in URL
-            server_config.remote.url = self.substitute_string(&re, &server_config.remote.url)?;
+            server_config.remote.url = self.substitute_string(re, &server_config.remote.url)?;
 
             // Substitute in headers
             if let Some(headers) = &mut server_config.remote.headers {
                 for header in headers.iter_mut() {
-                    header.value = self.substitute_string(&re, &header.value)?;
+                    header.value = self.substitute_string(re, &header.value)?;
                 }
             }
         }
@@ -184,6 +195,8 @@ impl ConfigManager {
             warn!("Configuration contains no servers");
         }
 
+        let re = env_var_regex();
+
         for (name, server) in &config.servers {
             // Validate URL format
             if !server.remote.url.starts_with("http://") && !server.remote.url.starts_with("https://") {
@@ -191,7 +204,6 @@ impl ConfigManager {
             }
 
             // Check for remaining unsubstituted variables (indicates missing env vars)
-            let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}")?;
             if re.is_match(&server.remote.url) {
                 warn!("Server '{}' URL contains unsubstituted variables: {}", name, server.remote.url);
             }
@@ -210,25 +222,31 @@ impl ConfigManager {
     }
 }
 
-impl Default for ConfigManager {
-    fn default() -> Self {
-        Self::new().expect("Failed to create default ConfigManager")
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_env_substitution() {
+    fn test_env_substitution_uppercase() {
         let mut manager = ConfigManager::new().unwrap();
         manager.env_vars.insert("TEST_TOKEN".to_string(), "secret123".to_string());
 
-        let re = Regex::new(r"\$\{([A-Z_][A-Z0-9_]*)\}").unwrap();
-        let result = manager.substitute_string(&re, "Bearer ${TEST_TOKEN}").unwrap();
+        let re = env_var_regex();
+        let result = manager.substitute_string(re, "Bearer ${TEST_TOKEN}").unwrap();
 
         assert_eq!(result, "Bearer secret123");
+    }
+
+    #[test]
+    fn test_env_substitution_lowercase() {
+        let mut manager = ConfigManager::new().unwrap();
+        manager.env_vars.insert("my_token".to_string(), "lowercase_secret".to_string());
+
+        let re = env_var_regex();
+        let result = manager.substitute_string(re, "Bearer ${my_token}").unwrap();
+
+        assert_eq!(result, "Bearer lowercase_secret");
     }
 
     #[test]

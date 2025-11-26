@@ -89,7 +89,7 @@ pub async fn create_transport(
 ) -> Result<Box<dyn McpClientTransport>> {
     match transport_type {
         mcp_types::TransportType::Http => {
-            Ok(Box::new(HttpTransport::new(config)))
+            Ok(Box::new(HttpTransport::new(config)?))
         }
         mcp_types::TransportType::Stdio => {
             Ok(Box::new(StdioTransport::new(config)))

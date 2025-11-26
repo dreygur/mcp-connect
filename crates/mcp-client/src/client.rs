@@ -199,9 +199,15 @@ impl McpRemoteClient {
 
     async fn send_request_with_retry(&self, request: &str) -> Result<String> {
         const MAX_RETRY_ATTEMPTS: usize = 3;
+        const BASE_DELAY_MS: u64 = 100;
+
+        let mut attempted_transports = std::collections::HashSet::new();
 
         for attempt in 1..=MAX_RETRY_ATTEMPTS {
             self.ensure_connected().await?;
+
+            let current_index = *self.current_transport_index.lock().await;
+            attempted_transports.insert(current_index);
 
             let mut transport_guard = self.current_transport.lock().await;
             if let Some(transport) = transport_guard.as_mut() {
@@ -209,16 +215,30 @@ impl McpRemoteClient {
                     Ok(response) => return Ok(response),
                     Err(e) => {
                         error!("Request attempt {} failed: {}", attempt, e);
-                        if attempt == MAX_RETRY_ATTEMPTS {
-                            return Err(e);
-                        }
-                        // Mark transport as disconnected and try next transport
+
+                        // Mark transport as disconnected
                         drop(transport_guard);
                         *self.current_transport.lock().await = None;
 
-                        // Move to next transport for retry
+                        // Move to next transport (without wrap-around to avoid infinite loop)
                         let mut index_guard = self.current_transport_index.lock().await;
-                        *index_guard = (*index_guard + 1) % self.transports.len();
+                        let next_index = *index_guard + 1;
+
+                        // Check if we've exhausted all transports
+                        if next_index >= self.transports.len() || attempted_transports.len() >= self.transports.len() {
+                            if attempt == MAX_RETRY_ATTEMPTS {
+                                return Err(e);
+                            }
+                            // Reset to first transport for next retry round
+                            *index_guard = 0;
+                            attempted_transports.clear();
+                        } else {
+                            *index_guard = next_index;
+                        }
+
+                        // Exponential backoff before retry
+                        let delay = BASE_DELAY_MS * (1 << (attempt - 1));
+                        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
                     }
                 }
             } else {

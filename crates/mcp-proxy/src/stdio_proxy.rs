@@ -4,7 +4,7 @@ use crate::strategy::ProxyStrategy;
 use mcp_types::McpServer;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 pub struct StdioMcpProxy {
     proxy: McpProxy,
@@ -33,10 +33,38 @@ impl StdioMcpProxy {
 
         info!("STDIO MCP Proxy ready, listening for messages");
 
+        // Set up graceful shutdown signal handling
+        #[cfg(unix)]
+        let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .map_err(|e| ProxyError::Io(e))?;
+
         loop {
             line.clear();
 
-            match reader.read_line(&mut line).await {
+            // Use select to handle both stdin and shutdown signals
+            #[cfg(unix)]
+            let read_result = tokio::select! {
+                result = reader.read_line(&mut line) => result,
+                _ = sigterm.recv() => {
+                    warn!("Received SIGTERM, initiating graceful shutdown");
+                    break;
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    warn!("Received SIGINT (Ctrl+C), initiating graceful shutdown");
+                    break;
+                }
+            };
+
+            #[cfg(not(unix))]
+            let read_result = tokio::select! {
+                result = reader.read_line(&mut line) => result,
+                _ = tokio::signal::ctrl_c() => {
+                    warn!("Received Ctrl+C, initiating graceful shutdown");
+                    break;
+                }
+            };
+
+            match read_result {
                 Ok(0) => {
                     info!("EOF reached, shutting down proxy");
                     break;
@@ -100,7 +128,8 @@ impl StdioMcpProxy {
             }
         }
 
-        // Shutdown the proxy
+        // Shutdown the proxy gracefully
+        info!("Shutting down proxy...");
         self.proxy.shutdown().await?;
         info!("STDIO MCP Proxy shut down");
         Ok(())

@@ -15,6 +15,7 @@ pub struct McpStdioServer {
     stdin: AsyncBufReader<tokio::io::Stdin>,
     stdout: tokio::io::Stdout,
     log_sender: Option<mpsc::UnboundedSender<LogMessage>>,
+    log_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 #[allow(dead_code)]
@@ -30,6 +31,7 @@ impl McpStdioServer {
             stdin,
             stdout,
             log_sender: None,
+            log_task: None,
         }
     }
 
@@ -94,13 +96,14 @@ impl McpStdioServer {
             let (tx, mut rx) = mpsc::unbounded_channel();
             self.log_sender = Some(tx);
 
-            // Spawn a task to handle log notifications
-            tokio::spawn(async move {
+            // Spawn a task to handle log notifications and store the handle
+            let handle = tokio::spawn(async move {
                 while let Some(log_msg) = rx.recv().await {
                     // Send notification to stderr (not stdout to avoid interfering with MCP protocol)
                     eprintln!("{}: {}", log_msg.level, log_msg.message);
                 }
             });
+            self.log_task = Some(handle);
         }
         Ok(())
     }
@@ -288,6 +291,15 @@ impl McpServer for McpStdioServer {
 
     async fn shutdown(&mut self) -> mcp_types::Result<()> {
         self.log_info("Server shutting down").await;
+
+        // Drop the sender to signal the log task to exit
+        self.log_sender.take();
+
+        // Wait for the log task to complete
+        if let Some(handle) = self.log_task.take() {
+            let _ = handle.await;
+        }
+
         Ok(())
     }
 }

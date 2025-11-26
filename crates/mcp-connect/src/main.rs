@@ -43,7 +43,7 @@ mod transport;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use mcp_client::McpRemoteClient;
+use mcp_client::{McpRemoteClient, OAuthDiscovery, OAuthRequirement};
 use mcp_proxy::{stdio_proxy::StdioProxyBuilder, strategy::{ForwardingStrategy, LoadBalancingStrategy}};
 use mcp_types::{TransportType, McpClient, LogLevel};
 use serde_json::json;
@@ -226,7 +226,7 @@ enum Commands {
         output: Option<String>,
     },
 
-    /// Run as a proxy server (STDIO mode) - LEGACY
+    /// Run as a proxy server (STDIO mode) with auto OAuth detection
     Proxy {
         #[arg(long, help = "Primary remote server endpoint")]
         endpoint: String,
@@ -254,6 +254,15 @@ enum Commands {
 
         #[arg(long, help = "Custom User-Agent header")]
         user_agent: Option<String>,
+
+        #[arg(long, help = "OAuth client ID (for servers requiring OAuth)")]
+        oauth_client_id: Option<String>,
+
+        #[arg(long, help = "OAuth client secret (optional, for confidential clients)")]
+        oauth_client_secret: Option<String>,
+
+        #[arg(long, help = "OAuth redirect port (default: 8085)", default_value = "8085")]
+        oauth_redirect_port: u16,
     },
 
     /// Run with load balancing across multiple endpoints
@@ -314,6 +323,24 @@ enum Commands {
     NotificationDemo {
         #[arg(long, help = "Number of test notifications to send", default_value = "3")]
         count: u32,
+    },
+
+    /// Pre-authenticate with an OAuth-protected endpoint
+    Auth {
+        #[arg(long, help = "Remote server endpoint")]
+        endpoint: String,
+
+        #[arg(long, help = "OAuth client ID (optional if server supports dynamic registration)")]
+        oauth_client_id: Option<String>,
+
+        #[arg(long, help = "OAuth client secret (optional)")]
+        oauth_client_secret: Option<String>,
+
+        #[arg(long, help = "OAuth redirect port (default: 8085)", default_value = "8085")]
+        oauth_redirect_port: u16,
+
+        #[arg(long, help = "Clear cached token instead of authenticating")]
+        clear: bool,
     },
 }
 
@@ -405,6 +432,78 @@ fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
     Ok(())
 }
 
+async fn run_auth(
+    endpoint: String,
+    oauth_client_id: Option<String>,
+    oauth_client_secret: Option<String>,
+    oauth_redirect_port: u16,
+    clear: bool,
+) -> Result<()> {
+    if clear {
+        info!("Clearing cached OAuth token for: {}", endpoint);
+        mcp_client::OAuthDiscovery::clear_cached_token(&endpoint)?;
+        println!("Cleared cached token for {}", endpoint);
+        return Ok(());
+    }
+
+    info!("Pre-authenticating with: {}", endpoint);
+
+    // Check if already have a valid token
+    if let Some((token, _, _, _)) = mcp_client::OAuthDiscovery::load_cached_token(&endpoint) {
+        println!("Found cached token for {}", endpoint);
+        println!("Token (first 20 chars): {}...", &token[..token.len().min(20)]);
+        println!("\nTo re-authenticate, run: mcp-connect auth --endpoint {} --clear", endpoint);
+        return Ok(());
+    }
+
+    let discovery = OAuthDiscovery::with_credentials(
+        oauth_client_id.clone(),
+        oauth_client_secret.clone(),
+        Some(oauth_redirect_port),
+    )?;
+
+    // Check if OAuth is required
+    match discovery.check_oauth_required(&endpoint).await {
+        Ok(OAuthRequirement::NotRequired) => {
+            println!("OAuth not required for this endpoint");
+            Ok(())
+        }
+        Ok(OAuthRequirement::Required(metadata)) => {
+            println!("OAuth required, starting authentication flow...");
+            println!("A browser window will open for authentication.\n");
+
+            match discovery.authenticate(&metadata, None).await {
+                Ok(token) => {
+                    // Cache the token
+                    let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
+                    mcp_client::OAuthDiscovery::save_token_to_cache(
+                        &endpoint,
+                        &token.access_token,
+                        token.refresh_token.as_deref(),
+                        token.expires_at,
+                        client_id,
+                        oauth_client_secret.as_deref(),
+                    )?;
+
+                    println!("\n✓ Authentication successful!");
+                    println!("Token cached. You can now use this endpoint with Claude CLI:");
+                    println!("\n  claude mcp add myserver -- mcp-connect proxy --endpoint {}", endpoint);
+                    Ok(())
+                }
+                Err(e) => {
+                    Err(anyhow::anyhow!("OAuth authentication failed: {}", e))
+                }
+            }
+        }
+        Ok(OAuthRequirement::RequiredButNoMetadata(reason)) => {
+            Err(anyhow::anyhow!("OAuth required but discovery failed: {}", reason))
+        }
+        Err(e) => {
+            Err(anyhow::anyhow!("Failed to check OAuth: {}", e))
+        }
+    }
+}
+
 async fn run_notification_demo(count: u32) -> Result<()> {
     info!("Starting MCP Notification Demo");
 
@@ -448,6 +547,9 @@ async fn run_proxy(
     auth_token: Option<String>,
     api_key: Option<String>,
     user_agent: Option<String>,
+    oauth_client_id: Option<String>,
+    oauth_client_secret: Option<String>,
+    oauth_redirect_port: u16,
     debug: bool,
 ) -> Result<()> {
     info!("Starting MCP Connect");
@@ -464,6 +566,75 @@ async fn run_proxy(
 
     info!("Fallback transports: {:?}", fallback_transports);
 
+    // Check if OAuth is required (only if no auth token provided)
+    let final_auth_token = if auth_token.is_some() {
+        auth_token
+    } else {
+        // First, check for cached token
+        if let Some((cached_token, _refresh, _client_id, _client_secret)) =
+            mcp_client::OAuthDiscovery::load_cached_token(&endpoint)
+        {
+            info!("Using cached OAuth token");
+            Some(cached_token)
+        } else {
+            // Auto-discover OAuth if needed
+            info!("Checking if OAuth authentication is required...");
+            let discovery = OAuthDiscovery::with_credentials(
+                oauth_client_id.clone(),
+                oauth_client_secret.clone(),
+                Some(oauth_redirect_port),
+            )?;
+
+            match discovery.check_oauth_required(&endpoint).await {
+                Ok(OAuthRequirement::NotRequired) => {
+                    info!("OAuth not required for this endpoint");
+                    None
+                }
+                Ok(OAuthRequirement::Required(metadata)) => {
+                    info!("OAuth required, starting authentication flow...");
+                    send_mcp_notification(LogLevel::Info, "OAuth authentication required, please check terminal for authorization URL");
+
+                    match discovery.authenticate(&metadata, None).await {
+                        Ok(token) => {
+                            info!("OAuth authentication successful");
+                            send_mcp_notification(LogLevel::Info, "OAuth authentication successful");
+
+                            // Cache the token for future use
+                            let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
+                            if let Err(e) = mcp_client::OAuthDiscovery::save_token_to_cache(
+                                &endpoint,
+                                &token.access_token,
+                                token.refresh_token.as_deref(),
+                                token.expires_at,
+                                client_id,
+                                oauth_client_secret.as_deref(),
+                            ) {
+                                warn!("Failed to cache OAuth token: {}", e);
+                            }
+
+                            Some(token.access_token)
+                        }
+                        Err(e) => {
+                            error!("OAuth authentication failed: {}", e);
+                            send_mcp_notification(LogLevel::Error, &format!("OAuth authentication failed: {}", e));
+                            return Err(anyhow::anyhow!("OAuth authentication failed: {}", e));
+                        }
+                    }
+                }
+                Ok(OAuthRequirement::RequiredButNoMetadata(reason)) => {
+                    warn!("OAuth may be required but metadata discovery failed: {}", reason);
+                    warn!("Attempting to connect without authentication...");
+                    None
+                }
+                Err(e) => {
+                    warn!("Failed to check OAuth requirement: {}", e);
+                    warn!("Attempting to connect without authentication...");
+                    None
+                }
+            }
+        }
+    };
+
     // Build primary transport config with headers
     let primary_config = transport::build_transport_config(
         endpoint.clone(),
@@ -471,7 +642,7 @@ async fn run_proxy(
         retry_attempts,
         retry_delay,
         headers,
-        auth_token,
+        final_auth_token,
         api_key,
         user_agent,
     )?;
@@ -690,6 +861,9 @@ async fn main() -> Result<()> {
             auth_token,
             api_key,
             user_agent,
+            oauth_client_id,
+            oauth_client_secret,
+            oauth_redirect_port,
         } => {
             run_proxy(
                 endpoint,
@@ -701,6 +875,9 @@ async fn main() -> Result<()> {
                 auth_token,
                 api_key,
                 user_agent,
+                oauth_client_id,
+                oauth_client_secret,
+                oauth_redirect_port,
                 cli.debug
             ).await
         }
@@ -752,6 +929,16 @@ async fn main() -> Result<()> {
 
         Commands::NotificationDemo { count } => {
             run_notification_demo(count).await
+        }
+
+        Commands::Auth {
+            endpoint,
+            oauth_client_id,
+            oauth_client_secret,
+            oauth_redirect_port,
+            clear,
+        } => {
+            run_auth(endpoint, oauth_client_id, oauth_client_secret, oauth_redirect_port, clear).await
         }
     };
 

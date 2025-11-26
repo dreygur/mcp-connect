@@ -7,6 +7,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
+/// Mask sensitive token for logging (show first 8 chars + "...")
+fn mask_token(token: &str) -> String {
+    if token.len() <= 12 {
+        "***".to_string()
+    } else {
+        format!("{}...", &token[..8])
+    }
+}
+
 pub struct HttpTransport {
     client: Client,
     config: TransportConfig,
@@ -15,18 +24,18 @@ pub struct HttpTransport {
 }
 
 impl HttpTransport {
-    pub fn new(config: TransportConfig) -> Self {
+    pub fn new(config: TransportConfig) -> Result<Self> {
         let client = Client::builder()
             .timeout(config.timeout)
             .build()
-            .unwrap();
+            .map_err(|e| ClientError::Connection(format!("Failed to create HTTP client: {}", e)))?;
 
-        Self {
+        Ok(Self {
             client,
             config,
             connected: Arc::new(Mutex::new(false)),
             session_id: Arc::new(Mutex::new(None)),
-        }
+        })
     }
 
     async fn send_http_request(&self, payload: &str) -> Result<String> {
@@ -34,8 +43,14 @@ impl HttpTransport {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(ACCEPT, HeaderValue::from_static("application/json, text/event-stream"));
 
-        // Add custom headers from config
+        // Add custom headers from config (mask sensitive values in logs)
         for (key, value) in &self.config.headers {
+            let log_value = if key.to_lowercase() == "authorization" {
+                mask_token(value)
+            } else {
+                value.clone()
+            };
+            debug!("Adding header: {}={}", key, log_value);
             headers.insert(
                 HeaderName::from_str(key).map_err(|e| ClientError::Protocol(format!("Invalid header name '{}': {}", key, e)))?,
                 HeaderValue::from_str(value).map_err(|e| ClientError::Protocol(format!("Invalid header value for '{}': {}", key, e)))?
@@ -44,6 +59,7 @@ impl HttpTransport {
 
         // Add authentication token if present
         if let Some(auth_token) = &self.config.auth_token {
+            debug!("Adding auth token: {}", mask_token(auth_token));
             headers.insert("Authorization", HeaderValue::from_str(auth_token)
                 .map_err(|e| ClientError::Protocol(format!("Invalid auth token: {}", e)))?);
         }
@@ -133,49 +149,10 @@ impl HttpTransport {
     }
 
     async fn test_connection(&self) -> Result<()> {
-        // For HTTP transport, we test by making a simple GET request to check if the endpoint exists
-        // Instead of sending a ping, we'll do a basic HTTP connectivity test
-        let mut headers = HeaderMap::new();
-        headers.insert(ACCEPT, HeaderValue::from_static("text/event-stream"));
-
-        // Add custom headers from config
-        for (key, value) in &self.config.headers {
-            headers.insert(
-                HeaderName::from_str(key).map_err(|e| ClientError::Protocol(format!("Invalid header name '{}': {}", key, e)))?,
-                HeaderValue::from_str(value).map_err(|e| ClientError::Protocol(format!("Invalid header value for '{}': {}", key, e)))?
-            );
-        }
-
-        // Add authentication token if present
-        if let Some(auth_token) = &self.config.auth_token {
-            headers.insert("Authorization", HeaderValue::from_str(auth_token)
-                .map_err(|e| ClientError::Protocol(format!("Invalid auth token: {}", e)))?);
-        }
-
-        // Add custom user agent if present
-        if let Some(user_agent) = &self.config.user_agent {
-            headers.insert("User-Agent", HeaderValue::from_str(user_agent)
-                .map_err(|e| ClientError::Protocol(format!("Invalid user agent: {}", e)))?);
-        }
-
-        let response = self.client
-            .get(&self.config.endpoint)
-            .headers(headers)
-            .send()
-            .await?;
-
-        // Accept various HTTP status codes that indicate the server exists
-        match response.status().as_u16() {
-            200..=299 => Ok(()), // Success responses
-            405 => Ok(()),       // Method Not Allowed - server exists but doesn't support GET
-            406 => Ok(()),       // Not Acceptable - server exists but wants different Accept header
-            404 => Err(ClientError::Connection("MCP endpoint not found".to_string())),
-            _ => {
-                let status = response.status();
-                info!("HTTP test returned status {}, assuming server is available", status);
-                Ok(()) // Be permissive for other status codes
-            }
-        }
+        // For MCP over HTTP, we skip the connection test and let the first actual request determine connectivity
+        // This is because many MCP servers only accept POST requests and return errors for GET
+        info!("HTTP transport ready (connection will be verified on first request)");
+        Ok(())
     }
 }
 

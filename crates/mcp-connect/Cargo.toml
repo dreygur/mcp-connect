@@ -8,10 +8,6 @@ authors = ["Rakibul Yeasin <ryeasin03@gmail.com>"]
 name = "mcp-connect"
 path = "src/main.rs"
 
-[[example]]
-name = "minimal_server_test"
-path = "examples/minimal_server_test.rs"
-
 [dependencies]
 mcp-types = { path = "../mcp-types" }
 mcp-server = { path = "../mcp-server" }
@@ -32,3 +28,5 @@ reqwest = { workspace = true }
 inquire = "0.7"
 async-trait = { workspace = true }
 rmcp = { workspace = true }
+url = { workspace = true }
+open = "5.0"

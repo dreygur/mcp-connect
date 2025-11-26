@@ -219,7 +219,7 @@ impl RegistryClient {
 
     /// Check if a server has remote (HTTP) transport support.
     pub fn has_remote_transport(server: &ServerDetail) -> bool {
-        server.remotes.is_some() && !server.remotes.as_ref().unwrap().is_empty()
+        server.remotes.as_ref().map_or(false, |r| !r.is_empty())
     }
 
     /// Convert ServerDetail to our RemoteConfig format.
@@ -253,15 +253,11 @@ impl RegistryClient {
             transport_type,
             url: remote.url.clone(),
             headers,
+            oauth: None,
         }))
     }
 }
 
-impl Default for RegistryClient {
-    fn default() -> Self {
-        Self::new().expect("Failed to create registry client")
-    }
-}
 
 /// Response from the servers list endpoint.
 #[derive(Debug, Deserialize)]

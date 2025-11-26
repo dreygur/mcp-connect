@@ -392,6 +392,8 @@ pub trait McpClient: Send + Sync {
 ///     env_file: Some(".env".to_string()),
 ///     servers: HashMap::new(),
 ///     routing: None,
+///     registries: None,
+///     default_registry: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -458,6 +460,7 @@ impl Default for ConnectConfig {
 ///             key: "Authorization".to_string(),
 ///             value: "Bearer ${GITHUB_TOKEN}".to_string(),
 ///         }]),
+///         oauth: None,
 ///     },
 ///     timeout: Some(30),
 ///     retry_attempts: Some(3),
@@ -510,6 +513,7 @@ pub struct ServerConfig {
 ///         key: "Authorization".to_string(),
 ///         value: "Bearer ${API_TOKEN}".to_string(),
 ///     }]),
+///     oauth: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -524,6 +528,64 @@ pub struct RemoteConfig {
     /// HTTP headers for authentication and customization
     #[serde(skip_serializing_if = "Option::is_none")]
     pub headers: Option<Vec<KeyValue>>,
+
+    /// OAuth configuration for servers requiring OAuth authentication
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub oauth: Option<OAuthConfig>,
+}
+
+/// OAuth configuration for connecting to OAuth-protected MCP servers.
+///
+/// Supports OAuth 2.0 Authorization Code flow with PKCE.
+///
+/// # Examples
+///
+/// ```rust
+/// use mcp_types::OAuthConfig;
+///
+/// let oauth = OAuthConfig {
+///     client_id: "my-client-id".to_string(),
+///     client_secret: None, // Public client with PKCE
+///     auth_url: "https://auth.example.com/authorize".to_string(),
+///     token_url: "https://auth.example.com/token".to_string(),
+///     redirect_url: "http://localhost:8085/callback".to_string(),
+///     scopes: vec!["mcp".to_string(), "profile".to_string()],
+///     use_pkce: true,
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthConfig {
+    /// OAuth client ID
+    #[serde(rename = "clientId")]
+    pub client_id: String,
+
+    /// OAuth client secret (optional for public clients using PKCE)
+    #[serde(rename = "clientSecret", skip_serializing_if = "Option::is_none")]
+    pub client_secret: Option<String>,
+
+    /// Authorization endpoint URL
+    #[serde(rename = "authUrl")]
+    pub auth_url: String,
+
+    /// Token endpoint URL
+    #[serde(rename = "tokenUrl")]
+    pub token_url: String,
+
+    /// Redirect URL for OAuth callback
+    #[serde(rename = "redirectUrl")]
+    pub redirect_url: String,
+
+    /// OAuth scopes to request
+    #[serde(default)]
+    pub scopes: Vec<String>,
+
+    /// Use PKCE (Proof Key for Code Exchange) - recommended for security
+    #[serde(rename = "usePkce", default = "default_use_pkce")]
+    pub use_pkce: bool,
+}
+
+fn default_use_pkce() -> bool {
+    true
 }
 
 /// Remote transport types supported by the MCP registry.

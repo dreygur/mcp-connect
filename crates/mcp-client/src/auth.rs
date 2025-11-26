@@ -1,8 +1,11 @@
-use crate::error::{Result, ClientError};
+use crate::error::{ClientError, Result};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
-use tokio::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::RwLock;
+use tracing::{debug, info};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthClientConfig {
@@ -12,6 +15,13 @@ pub struct OAuthClientConfig {
     pub token_url: String,
     pub redirect_url: String,
     pub scopes: Vec<String>,
+    /// Use PKCE (Proof Key for Code Exchange) - recommended for public clients
+    #[serde(default = "default_use_pkce")]
+    pub use_pkce: bool,
+}
+
+fn default_use_pkce() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,72 +32,194 @@ pub struct ClientToken {
     pub scope: Vec<String>,
 }
 
+/// OAuth token response from the authorization server
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct TokenResponse {
+    access_token: String,
+    token_type: String,
+    expires_in: Option<u64>,
+    refresh_token: Option<String>,
+    scope: Option<String>,
+}
+
+/// PKCE state for the OAuth flow
+#[derive(Debug, Clone)]
+struct PkceState {
+    code_verifier: String,
+    code_challenge: String,
+}
+
+/// Authorization state stored during OAuth flow
+#[derive(Debug, Clone)]
+struct AuthState {
+    state: String,
+    pkce: Option<PkceState>,
+}
+
 pub struct OAuthClient {
     config: OAuthClientConfig,
+    http_client: Client,
     token: Arc<RwLock<Option<ClientToken>>>,
-    auth_state: Arc<RwLock<Option<String>>>,
+    auth_state: Arc<RwLock<Option<AuthState>>>,
 }
 
 impl OAuthClient {
     pub fn new(config: OAuthClientConfig) -> Result<Self> {
+        let http_client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| ClientError::OAuthError(format!("Failed to create HTTP client: {}", e)))?;
+
         Ok(Self {
             config,
+            http_client,
             token: Arc::new(RwLock::new(None)),
             auth_state: Arc::new(RwLock::new(None)),
         })
     }
 
+    /// Generate a cryptographically secure random string for PKCE
+    fn generate_code_verifier() -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let random_bytes: [u8; 32] = rand::random();
+        URL_SAFE_NO_PAD.encode(random_bytes)
+    }
+
+    /// Generate the code challenge from the verifier using S256 method
+    fn generate_code_challenge(verifier: &str) -> String {
+        use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+        let mut hasher = Sha256::new();
+        hasher.update(verifier.as_bytes());
+        let hash = hasher.finalize();
+        URL_SAFE_NO_PAD.encode(hash)
+    }
+
     pub async fn generate_auth_url(&self) -> Result<String> {
         let state = format!("state_{}", uuid::Uuid::new_v4());
 
-        // Store the state for later verification
+        // Generate PKCE if enabled
+        let pkce = if self.config.use_pkce {
+            let code_verifier = Self::generate_code_verifier();
+            let code_challenge = Self::generate_code_challenge(&code_verifier);
+            Some(PkceState {
+                code_verifier,
+                code_challenge,
+            })
+        } else {
+            None
+        };
+
+        // Store the state and PKCE for later verification
         {
             let mut auth_state = self.auth_state.write().await;
-            *auth_state = Some(state.clone());
+            *auth_state = Some(AuthState {
+                state: state.clone(),
+                pkce: pkce.clone(),
+            });
         }
 
         let scopes = self.config.scopes.join(" ");
-        let auth_url = format!(
+        let mut auth_url = format!(
             "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}",
             self.config.auth_url,
-            self.config.client_id,
+            urlencoding::encode(&self.config.client_id),
             urlencoding::encode(&self.config.redirect_url),
             urlencoding::encode(&scopes),
-            state
+            urlencoding::encode(&state)
         );
 
+        // Add PKCE parameters if enabled
+        if let Some(ref pkce_state) = pkce {
+            auth_url.push_str(&format!(
+                "&code_challenge={}&code_challenge_method=S256",
+                urlencoding::encode(&pkce_state.code_challenge)
+            ));
+        }
+
+        debug!("Generated OAuth authorization URL: {}", auth_url);
         Ok(auth_url)
     }
 
-    pub async fn exchange_code(&self, _code: &str, state: &str) -> Result<ClientToken> {
-        // Verify state
-        let expected_state = {
+    pub async fn exchange_code(&self, code: &str, state: &str) -> Result<ClientToken> {
+        // Verify state and get PKCE verifier
+        let auth_state = {
             let auth_state = self.auth_state.read().await;
             auth_state.clone()
         };
 
-        let expected_state = expected_state
+        let auth_state = auth_state
             .ok_or_else(|| ClientError::OAuthError("No auth state found".to_string()))?;
 
-        if expected_state != state {
-            return Err(ClientError::OAuthError("State mismatch".to_string()));
+        if auth_state.state != state {
+            return Err(ClientError::OAuthError("State mismatch - possible CSRF attack".to_string()));
         }
 
-        // In a real implementation, this would make an HTTP request to the token endpoint
-        // For now, we'll create a mock token
-        let access_token = format!("client_access_{}", uuid::Uuid::new_v4());
-        let refresh_token = format!("client_refresh_{}", uuid::Uuid::new_v4());
-        let expires_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() + 3600; // 1 hour
+        // Build token request
+        let mut params = vec![
+            ("grant_type", "authorization_code".to_string()),
+            ("code", code.to_string()),
+            ("redirect_uri", self.config.redirect_url.clone()),
+            ("client_id", self.config.client_id.clone()),
+        ];
+
+        // Add client secret if available (confidential clients)
+        if let Some(ref secret) = self.config.client_secret {
+            params.push(("client_secret", secret.clone()));
+        }
+
+        // Add PKCE code verifier if used
+        if let Some(ref pkce_state) = auth_state.pkce {
+            params.push(("code_verifier", pkce_state.code_verifier.clone()));
+        }
+
+        debug!("Exchanging authorization code for token at: {}", self.config.token_url);
+
+        // Make the token request
+        let response = self
+            .http_client
+            .post(&self.config.token_url)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| ClientError::OAuthError(format!("Token request failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ClientError::OAuthError(format!(
+                "Token endpoint returned {}: {}",
+                status, body
+            )));
+        }
+
+        let token_response: TokenResponse = response
+            .json()
+            .await
+            .map_err(|e| ClientError::OAuthError(format!("Failed to parse token response: {}", e)))?;
+
+        // Calculate expiration time
+        let expires_at = token_response.expires_in.and_then(|seconds| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() + seconds)
+        });
+
+        // Parse scope from response or use configured scopes
+        let scope = token_response
+            .scope
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or_else(|| self.config.scopes.clone());
 
         let client_token = ClientToken {
-            access_token,
-            refresh_token: Some(refresh_token),
-            expires_at: Some(expires_at),
-            scope: self.config.scopes.clone(),
+            access_token: token_response.access_token,
+            refresh_token: token_response.refresh_token,
+            expires_at,
+            scope,
         };
+
+        info!("Successfully exchanged authorization code for access token");
 
         // Store the token
         {
@@ -118,24 +250,69 @@ impl OAuthClient {
         let current_token = current_token
             .ok_or_else(|| ClientError::OAuthError("No token found".to_string()))?;
 
-        if current_token.refresh_token.is_none() {
-            return Err(ClientError::OAuthError("No refresh token available".to_string()));
+        let refresh_token = current_token
+            .refresh_token
+            .ok_or_else(|| ClientError::OAuthError("No refresh token available".to_string()))?;
+
+        // Build refresh token request
+        let mut params = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token),
+            ("client_id", self.config.client_id.clone()),
+        ];
+
+        // Add client secret if available
+        if let Some(ref secret) = self.config.client_secret {
+            params.push(("client_secret", secret.clone()));
         }
 
-        // Generate new tokens (in a real implementation, this would call the token endpoint)
-        let access_token = format!("client_access_{}", uuid::Uuid::new_v4());
-        let refresh_token = format!("client_refresh_{}", uuid::Uuid::new_v4());
-        let expires_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() + 3600; // 1 hour
+        debug!("Refreshing access token at: {}", self.config.token_url);
+
+        // Make the refresh request
+        let response = self
+            .http_client
+            .post(&self.config.token_url)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| ClientError::OAuthError(format!("Token refresh failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ClientError::OAuthError(format!(
+                "Token refresh returned {}: {}",
+                status, body
+            )));
+        }
+
+        let token_response: TokenResponse = response
+            .json()
+            .await
+            .map_err(|e| ClientError::OAuthError(format!("Failed to parse refresh response: {}", e)))?;
+
+        // Calculate expiration time
+        let expires_at = token_response.expires_in.and_then(|seconds| {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() + seconds)
+        });
+
+        // Parse scope from response or keep current scopes
+        let scope = token_response
+            .scope
+            .map(|s| s.split_whitespace().map(String::from).collect())
+            .unwrap_or(current_token.scope);
 
         let new_token = ClientToken {
-            access_token,
-            refresh_token: Some(refresh_token),
-            expires_at: Some(expires_at),
-            scope: current_token.scope,
+            access_token: token_response.access_token,
+            refresh_token: token_response.refresh_token,
+            expires_at,
+            scope,
         };
+
+        info!("Successfully refreshed access token");
 
         // Update stored token
         {
@@ -151,8 +328,8 @@ impl OAuthClient {
             if let Some(expires_at) = token.expires_at {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 return now < expires_at;
             }
             return true; // If no expiration time, assume valid
@@ -219,6 +396,7 @@ mod tests {
             token_url: "https://example.com/oauth/token".to_string(),
             redirect_url: "http://localhost:8080/callback".to_string(),
             scopes: vec!["read".to_string(), "write".to_string()],
+            use_pkce: true,
         }
     }
 

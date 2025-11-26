@@ -27,18 +27,6 @@ impl ForwardingStrategy {
         }
     }
 
-    async fn ensure_initialized(&self) -> Result<()> {
-        let initialized = *self.initialized.lock().await;
-        if !initialized {
-            let mut client = self.client.lock().await;
-            client.connect().await?;
-            let _init_result = client.initialize().await?;
-            *self.initialized.lock().await = true;
-            info!("Proxy client initialized successfully");
-        }
-        Ok(())
-    }
-
     fn is_notification(message: &str) -> bool {
         if let Ok(parsed) = serde_json::from_str::<Value>(message) {
             parsed.get("id").is_none() && parsed.get("method").is_some()
@@ -53,6 +41,23 @@ impl ForwardingStrategy {
             .and_then(|v| v.get("method").cloned())
             .and_then(|m| m.as_str().map(|s| s.to_string()))
     }
+
+    async fn handle_initialize(&self, request: &str) -> Result<Option<String>> {
+        debug!("Handling initialize request");
+
+        // Connect and initialize with remote
+        let mut client = self.client.lock().await;
+        client.connect().await?;
+
+        // Forward the initialize request to remote
+        let response = client.send_request(request).await?;
+
+        // Mark as initialized
+        *self.initialized.lock().await = true;
+        info!("Proxy client initialized via forwarded request");
+
+        Ok(Some(response))
+    }
 }
 
 #[async_trait]
@@ -63,14 +68,44 @@ impl ProxyStrategy for ForwardingStrategy {
         // Check if it's a notification (no response expected)
         if Self::is_notification(request) {
             debug!("Received notification, forwarding without expecting response");
-            // For notifications, we might want to forward them but don't expect a response
+            // Forward notification to remote but don't wait for response
+            let initialized = *self.initialized.lock().await;
+            if initialized {
+                let mut client = self.client.lock().await;
+                if let Err(e) = client.send_request(request).await {
+                    warn!("Failed to forward notification: {}", e);
+                }
+            }
             return Ok(None);
         }
 
-        self.ensure_initialized().await?;
-
         let method = Self::extract_method(request);
         debug!("Extracted method: {:?}", method);
+
+        // Handle initialize specially - connect to remote and forward
+        if method.as_deref() == Some("initialize") {
+            return self.handle_initialize(request).await;
+        }
+
+        // For other requests, ensure we're initialized first
+        let initialized = *self.initialized.lock().await;
+        if !initialized {
+            // Return error - client should send initialize first
+            if let Ok(parsed) = serde_json::from_str::<Value>(request) {
+                if let Some(id) = parsed.get("id") {
+                    let error_response = serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "error": {
+                            "code": -32002,
+                            "message": "Server not initialized. Send initialize request first."
+                        }
+                    });
+                    return Ok(Some(error_response.to_string()));
+                }
+            }
+            return Err(ProxyError::NotInitialized);
+        }
 
         let mut client = self.client.lock().await;
         match client.send_request(request).await {
@@ -102,7 +137,8 @@ impl ProxyStrategy for ForwardingStrategy {
     }
 
     async fn initialize(&self) -> Result<()> {
-        self.ensure_initialized().await
+        // Don't initialize here - wait for client's initialize request
+        Ok(())
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -160,7 +196,17 @@ impl ProxyStrategy for LoadBalancingStrategy {
         debug!("Load balancing request: {}", request);
 
         if ForwardingStrategy::is_notification(request) {
-            debug!("Received notification, no response expected");
+            debug!("Received notification, forwarding to all clients");
+            // Forward notification to all initialized clients
+            let initialized = self.initialized.lock().await;
+            for (i, client) in self.clients.iter().enumerate() {
+                if initialized[i] {
+                    let mut client_guard = client.lock().await;
+                    if let Err(e) = client_guard.send_request(request).await {
+                        warn!("Failed to forward notification to client {}: {}", i, e);
+                    }
+                }
+            }
             return Ok(None);
         }
 

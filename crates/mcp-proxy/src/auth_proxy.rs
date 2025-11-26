@@ -119,11 +119,11 @@ impl AuthenticatedProxy {
         let expires_in = params.get("expires_in")
             .and_then(|e| e.as_u64());
 
-        let expires_at = expires_in.map(|seconds| {
+        let expires_at = expires_in.and_then(|seconds| {
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() + seconds
+                .ok()
+                .map(|d| d.as_secs() + seconds)
         });
 
         let token = ClientToken {
@@ -208,8 +208,8 @@ impl AuthenticatedProxy {
             let is_valid = if let Some(expires_at) = token.expires_at {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 now < expires_at
             } else {
                 true
@@ -235,8 +235,8 @@ impl AuthenticatedProxy {
             if let Some(expires_at) = token.expires_at {
                 let now = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
                 return now < expires_at;
             }
             return true;
@@ -284,8 +284,8 @@ impl AuthenticatedProxy {
         let mut sessions = self.authenticated_sessions.write().await;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         sessions.retain(|session_id, token| {
             if let Some(expires_at) = token.expires_at {
