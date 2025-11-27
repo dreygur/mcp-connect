@@ -139,7 +139,7 @@ impl OAuthDiscovery {
         })
     }
 
-    /// Load cached token for an endpoint
+    /// Load cached token for an endpoint (returns None if expired and no refresh token)
     pub fn load_cached_token(endpoint: &str) -> Option<(String, Option<String>, String, Option<String>)> {
         let cache_path = Self::get_cache_path(endpoint)?;
 
@@ -160,12 +160,130 @@ impl OAuthDiscovery {
 
             if now >= expires_at {
                 info!("Cached token expired, will need to refresh or re-authenticate");
-                // Return the data anyway - we might be able to refresh
+                // Only return if we have a refresh token
+                if cached.refresh_token.is_none() {
+                    info!("No refresh token available, need to re-authenticate");
+                    return None;
+                }
             }
         }
 
         info!("Loaded cached OAuth token for {}", endpoint);
         Some((cached.access_token, cached.refresh_token, cached.client_id, cached.client_secret))
+    }
+
+    /// Check if a cached token is expired
+    pub fn is_token_expired(endpoint: &str) -> bool {
+        let cache_path = match Self::get_cache_path(endpoint) {
+            Some(p) => p,
+            None => return true,
+        };
+
+        if !cache_path.exists() {
+            return true;
+        }
+
+        let data = match std::fs::read_to_string(&cache_path) {
+            Ok(d) => d,
+            Err(_) => return true,
+        };
+
+        let cached: CachedTokenData = match serde_json::from_str(&data) {
+            Ok(c) => c,
+            Err(_) => return true,
+        };
+
+        if let Some(expires_at) = cached.expires_at {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            // Consider expired 60 seconds before actual expiry
+            now + 60 >= expires_at
+        } else {
+            false // No expiry means not expired
+        }
+    }
+
+    /// Refresh an expired token
+    pub async fn refresh_token(
+        &self,
+        endpoint: &str,
+        refresh_token: &str,
+        client_id: &str,
+        client_secret: Option<&str>,
+    ) -> Result<ClientToken> {
+        info!("Attempting to refresh OAuth token for: {}", endpoint);
+
+        // Discover OAuth metadata to get token endpoint
+        let metadata = self.discover_oauth_metadata(endpoint).await?;
+
+        let mut params = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token.to_string()),
+            ("client_id", client_id.to_string()),
+        ];
+
+        if let Some(secret) = client_secret {
+            params.push(("client_secret", secret.to_string()));
+        }
+
+        let response = self
+            .http_client
+            .post(&metadata.token_endpoint)
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| ClientError::OAuthError(format!("Token refresh failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            return Err(ClientError::OAuthError(format!(
+                "Token refresh returned {}: {}",
+                status, body
+            )));
+        }
+
+        #[derive(Deserialize)]
+        struct TokenResponse {
+            access_token: String,
+            #[serde(default)]
+            refresh_token: Option<String>,
+            #[serde(default)]
+            expires_in: Option<u64>,
+        }
+
+        let token_response: TokenResponse = response.json().await.map_err(|e| {
+            ClientError::OAuthError(format!("Failed to parse refresh response: {}", e))
+        })?;
+
+        let expires_at = token_response.expires_in.and_then(|seconds| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_secs() + seconds)
+        });
+
+        let new_token = ClientToken {
+            access_token: token_response.access_token,
+            refresh_token: token_response.refresh_token.or_else(|| Some(refresh_token.to_string())),
+            expires_at,
+            scope: vec![],
+        };
+
+        // Update cache with new token
+        Self::save_token_to_cache(
+            endpoint,
+            &new_token.access_token,
+            new_token.refresh_token.as_deref(),
+            new_token.expires_at,
+            client_id,
+            client_secret,
+        ).ok();
+
+        info!("Successfully refreshed OAuth token");
+        Ok(new_token)
     }
 
     /// Save token to cache with secure file permissions

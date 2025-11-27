@@ -571,11 +571,43 @@ async fn run_proxy(
         auth_token
     } else {
         // First, check for cached token
-        if let Some((cached_token, _refresh, _client_id, _client_secret)) =
+        let cached_result = if let Some((cached_token, refresh_token, client_id, client_secret)) =
             mcp_client::OAuthDiscovery::load_cached_token(&endpoint)
         {
-            info!("Using cached OAuth token");
-            Some(cached_token)
+            // Check if token is expired and needs refresh
+            if mcp_client::OAuthDiscovery::is_token_expired(&endpoint) {
+                if let Some(ref refresh) = refresh_token {
+                    info!("Token expired, attempting refresh...");
+                    let discovery = OAuthDiscovery::with_credentials(
+                        oauth_client_id.clone().or(Some(client_id.clone())),
+                        oauth_client_secret.clone().or(client_secret.clone()),
+                        Some(oauth_redirect_port),
+                    )?;
+                    match discovery.refresh_token(&endpoint, refresh, &client_id, client_secret.as_deref()).await {
+                        Ok(new_token) => {
+                            info!("Token refreshed successfully");
+                            Some(new_token.access_token)
+                        }
+                        Err(e) => {
+                            warn!("Token refresh failed: {}, will re-authenticate", e);
+                            None // Need to re-authenticate
+                        }
+                    }
+                } else {
+                    info!("Token expired and no refresh token, need to re-authenticate");
+                    None
+                }
+            } else {
+                info!("Using cached OAuth token");
+                Some(cached_token)
+            }
+        } else {
+            None
+        };
+
+        // If we have a valid token from cache/refresh, use it
+        if cached_result.is_some() {
+            cached_result
         } else {
             // Auto-discover OAuth if needed
             info!("Checking if OAuth authentication is required...");

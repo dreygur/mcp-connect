@@ -3,7 +3,10 @@
 //! Run the multiplexing MCP server that serves all configured remote servers.
 
 use anyhow::{Context, Result};
-use mcp_client::{McpRemoteClient, OAuthClient, OAuthClientConfig};
+use mcp_client::{
+    McpRemoteClient, OAuthClient, OAuthClientConfig, TokenCache,
+    TokenProvider, OAuthTokenProvider, ClientToken,
+};
 use mcp_config::ConfigManager;
 use mcp_proxy::stdio_proxy::StdioProxyBuilder;
 use mcp_types::{ConnectConfig, McpClient, OAuthConfig};
@@ -65,6 +68,11 @@ impl MultiplexingStrategy {
         let mut clients = HashMap::new();
         let routing_config = config.routing.unwrap_or_default();
 
+        // Create shared token cache for all OAuth servers
+        let token_cache = Arc::new(
+            TokenCache::new().map_err(|e| anyhow::anyhow!("Failed to create token cache: {}", e))?
+        );
+
         // Create a client for each configured server
         for (name, server_config) in config.servers {
             info!("Initializing client for server: {}", name);
@@ -78,21 +86,22 @@ impl MultiplexingStrategy {
             }
 
             // Handle OAuth authentication if configured
-            let auth_token = if let Some(ref oauth_config) = server_config.remote.oauth {
-                match Self::perform_oauth_flow(&name, oauth_config).await {
-                    Ok(token) => {
-                        info!("OAuth authentication successful for server: {}", name);
-                        Some(format!("Bearer {}", token))
+            let token_provider: Option<Arc<dyn TokenProvider>> =
+                if let Some(ref oauth_config) = server_config.remote.oauth {
+                    match Self::setup_oauth_provider(&name, oauth_config, &token_cache).await {
+                        Ok(provider) => {
+                            info!("OAuth provider configured for server: {}", name);
+                            Some(provider)
+                        }
+                        Err(e) => {
+                            warn!("OAuth setup failed for server '{}': {}", name, e);
+                            warn!("Continuing without OAuth - server may reject requests");
+                            None
+                        }
                     }
-                    Err(e) => {
-                        warn!("OAuth authentication failed for server '{}': {}", name, e);
-                        warn!("Continuing without OAuth token - server may reject requests");
-                        None
-                    }
-                }
-            } else {
-                None
-            };
+                } else {
+                    None
+                };
 
             let transport_config = mcp_client::transport::TransportConfig {
                 endpoint: server_config.remote.url.clone(),
@@ -100,7 +109,8 @@ impl MultiplexingStrategy {
                 retry_attempts: server_config.retry_attempts.unwrap_or(3),
                 retry_delay: std::time::Duration::from_millis(1000),
                 headers,
-                auth_token,
+                auth_token: None,
+                token_provider,
                 user_agent: Some("mcp-connect/0.1.0".to_string()),
             };
 
@@ -120,6 +130,59 @@ impl MultiplexingStrategy {
             routing_config,
             connection_state,
         })
+    }
+
+    /// Set up OAuth provider for a server.
+    ///
+    /// Checks for cached token first, performs OAuth flow if needed,
+    /// and returns a token provider that handles automatic refresh.
+    async fn setup_oauth_provider(
+        server_name: &str,
+        oauth_config: &OAuthConfig,
+        token_cache: &Arc<TokenCache>,
+    ) -> Result<Arc<dyn TokenProvider>> {
+        // Convert config
+        let client_config = OAuthClientConfig {
+            client_id: oauth_config.client_id.clone(),
+            client_secret: oauth_config.client_secret.clone(),
+            auth_url: oauth_config.auth_url.clone(),
+            token_url: oauth_config.token_url.clone(),
+            redirect_url: oauth_config.redirect_url.clone(),
+            scopes: oauth_config.scopes.clone(),
+            use_pkce: oauth_config.use_pkce,
+        };
+
+        let oauth_client = Arc::new(
+            OAuthClient::new(client_config)
+                .map_err(|e| anyhow::anyhow!("Failed to create OAuth client: {}", e))?
+        );
+
+        // Try to load valid cached token or refresh
+        let initial_token = match token_cache.load_or_refresh(server_name, &oauth_client).await {
+            Ok(token) => {
+                info!("Using cached/refreshed token for server: {}", server_name);
+                token
+            }
+            Err(_) => {
+                // No valid cached token, perform full OAuth flow
+                let token = Self::perform_oauth_flow(server_name, oauth_config).await?;
+                // Save to cache for future use
+                if let Err(e) = token_cache.save(server_name, &token) {
+                    warn!("Failed to cache OAuth token: {}", e);
+                }
+                token
+            }
+        };
+
+        // Create the token provider
+        let provider = OAuthTokenProvider::new(
+            server_name.to_string(),
+            oauth_client,
+            token_cache.clone(),
+            Some(initial_token),
+        );
+
+        Ok(Arc::new(provider))
     }
 
     /// Ensure a client is connected, using cached connection state
@@ -164,12 +227,11 @@ impl MultiplexingStrategy {
         state.insert(server_name.to_string(), false);
     }
 
-    /// Perform OAuth flow for a server that requires authentication.
+    /// Perform full OAuth flow for a server that requires authentication.
     ///
-    /// This starts a local HTTP server to receive the OAuth callback,
-    /// opens the browser for user authentication, and exchanges the
-    /// authorization code for an access token.
-    async fn perform_oauth_flow(server_name: &str, oauth_config: &OAuthConfig) -> Result<String> {
+    /// Opens browser for user authentication and exchanges the code for a token.
+    /// Saves the token to cache after successful authentication.
+    async fn perform_oauth_flow(server_name: &str, oauth_config: &OAuthConfig) -> Result<ClientToken> {
         use tokio::net::TcpListener;
 
         info!("Starting OAuth flow for server: {}", server_name);
@@ -242,7 +304,7 @@ impl MultiplexingStrategy {
 
         eprintln!("✓ OAuth authentication successful!\n");
 
-        Ok(token.access_token)
+        Ok(token)
     }
 
     /// Wait for OAuth callback on the local server.

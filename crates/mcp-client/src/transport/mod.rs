@@ -1,7 +1,9 @@
+use crate::auth::TokenProvider;
 use crate::error::Result;
 use async_trait::async_trait;
 use base64::{Engine as _, engine::general_purpose};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 pub mod http;
@@ -20,14 +22,21 @@ pub trait McpClientTransport: Send + Sync {
     async fn is_connected(&self) -> bool;
 }
 
-#[derive(Debug, Clone)]
+/// Transport configuration
+///
+/// For authentication, prefer `token_provider` over `auth_token` as it supports
+/// automatic token refresh for OAuth flows.
+#[derive(Clone)]
 pub struct TransportConfig {
     pub endpoint: String,
     pub timeout: Duration,
     pub retry_attempts: u32,
     pub retry_delay: Duration,
     pub headers: HashMap<String, String>,
+    /// Static auth token (deprecated, use token_provider instead)
     pub auth_token: Option<String>,
+    /// Dynamic token provider for OAuth with automatic refresh
+    pub token_provider: Option<Arc<dyn TokenProvider>>,
     pub user_agent: Option<String>,
 }
 
@@ -40,6 +49,7 @@ impl Default for TransportConfig {
             retry_delay: Duration::from_millis(1000),
             headers: HashMap::new(),
             auth_token: None,
+            token_provider: None,
             user_agent: Some("mcp-connect-client/0.1.0".to_string()),
         }
     }
@@ -79,6 +89,11 @@ impl TransportConfig {
 
     pub fn with_user_agent(mut self, user_agent: String) -> Self {
         self.user_agent = Some(user_agent);
+        self
+    }
+
+    pub fn with_token_provider(mut self, provider: Arc<dyn TokenProvider>) -> Self {
+        self.token_provider = Some(provider);
         self
     }
 }

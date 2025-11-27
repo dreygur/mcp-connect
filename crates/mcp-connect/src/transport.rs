@@ -58,6 +58,7 @@ pub fn build_transport_config(
         retry_delay: Duration::from_millis(retry_delay),
         headers: parse_headers(headers)?,
         auth_token: None,
+        token_provider: None,
         user_agent,
     };
 

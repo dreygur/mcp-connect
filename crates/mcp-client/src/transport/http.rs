@@ -1,3 +1,4 @@
+use crate::auth::TokenProvider;
 use crate::error::{ClientError, Result};
 use crate::transport::{McpClientTransport, TransportConfig};
 use async_trait::async_trait;
@@ -21,6 +22,7 @@ pub struct HttpTransport {
     config: TransportConfig,
     connected: Arc<Mutex<bool>>,
     session_id: Arc<Mutex<Option<String>>>,
+    token_provider: Option<Arc<dyn TokenProvider>>,
 }
 
 impl HttpTransport {
@@ -30,11 +32,14 @@ impl HttpTransport {
             .build()
             .map_err(|e| ClientError::Connection(format!("Failed to create HTTP client: {}", e)))?;
 
+        let token_provider = config.token_provider.clone();
+
         Ok(Self {
             client,
             config,
             connected: Arc::new(Mutex::new(false)),
             session_id: Arc::new(Mutex::new(None)),
+            token_provider,
         })
     }
 
@@ -57,9 +62,31 @@ impl HttpTransport {
             );
         }
 
-        // Add authentication token if present
-        if let Some(auth_token) = &self.config.auth_token {
-            debug!("Adding auth token: {}", mask_token(auth_token));
+        // Add authentication token - prefer dynamic provider over static token
+        if let Some(ref provider) = self.token_provider {
+            match provider.get_token().await {
+                Ok(token) => {
+                    let auth_value = if token.starts_with("Bearer ") {
+                        token
+                    } else {
+                        format!("Bearer {}", token)
+                    };
+                    debug!("Adding dynamic auth token: {}", mask_token(&auth_value));
+                    headers.insert("Authorization", HeaderValue::from_str(&auth_value)
+                        .map_err(|e| ClientError::Protocol(format!("Invalid auth token: {}", e)))?);
+                }
+                Err(e) => {
+                    warn!("Failed to get token from provider: {}", e);
+                    // Fall through to static token if available
+                    if let Some(auth_token) = &self.config.auth_token {
+                        debug!("Falling back to static auth token: {}", mask_token(auth_token));
+                        headers.insert("Authorization", HeaderValue::from_str(auth_token)
+                            .map_err(|e| ClientError::Protocol(format!("Invalid auth token: {}", e)))?);
+                    }
+                }
+            }
+        } else if let Some(auth_token) = &self.config.auth_token {
+            debug!("Adding static auth token: {}", mask_token(auth_token));
             headers.insert("Authorization", HeaderValue::from_str(auth_token)
                 .map_err(|e| ClientError::Protocol(format!("Invalid auth token: {}", e)))?);
         }
