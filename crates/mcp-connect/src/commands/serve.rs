@@ -4,8 +4,8 @@
 
 use anyhow::{Context, Result};
 use mcp_client::{
-    McpRemoteClient, OAuthClient, OAuthClientConfig, TokenCache,
-    TokenProvider, OAuthTokenProvider, ClientToken,
+    McpRemoteClient, OAuthClient, OAuthClientConfig, OAuthDiscovery,
+    TokenProvider, ClientToken, StaticTokenProvider,
 };
 use mcp_config::ConfigManager;
 use mcp_proxy::stdio_proxy::StdioProxyBuilder;
@@ -68,11 +68,6 @@ impl MultiplexingStrategy {
         let mut clients = HashMap::new();
         let routing_config = config.routing.unwrap_or_default();
 
-        // Create shared token cache for all OAuth servers
-        let token_cache = Arc::new(
-            TokenCache::new().map_err(|e| anyhow::anyhow!("Failed to create token cache: {}", e))?
-        );
-
         // Create a client for each configured server
         for (name, server_config) in config.servers {
             info!("Initializing client for server: {}", name);
@@ -85,10 +80,12 @@ impl MultiplexingStrategy {
                 }
             }
 
+            let endpoint = &server_config.remote.url;
+
             // Handle OAuth authentication if configured
             let token_provider: Option<Arc<dyn TokenProvider>> =
                 if let Some(ref oauth_config) = server_config.remote.oauth {
-                    match Self::setup_oauth_provider(&name, oauth_config, &token_cache).await {
+                    match Self::setup_oauth_provider(&name, endpoint, oauth_config).await {
                         Ok(provider) => {
                             info!("OAuth provider configured for server: {}", name);
                             Some(provider)
@@ -133,56 +130,31 @@ impl MultiplexingStrategy {
     }
 
     /// Set up OAuth provider for a server.
-    ///
-    /// Checks for cached token first, performs OAuth flow if needed,
-    /// and returns a token provider that handles automatic refresh.
     async fn setup_oauth_provider(
         server_name: &str,
+        endpoint: &str,
         oauth_config: &OAuthConfig,
-        token_cache: &Arc<TokenCache>,
     ) -> Result<Arc<dyn TokenProvider>> {
-        // Convert config
-        let client_config = OAuthClientConfig {
-            client_id: oauth_config.client_id.clone(),
-            client_secret: oauth_config.client_secret.clone(),
-            auth_url: oauth_config.auth_url.clone(),
-            token_url: oauth_config.token_url.clone(),
-            redirect_url: oauth_config.redirect_url.clone(),
-            scopes: oauth_config.scopes.clone(),
-            use_pkce: oauth_config.use_pkce,
-        };
-
-        let oauth_client = Arc::new(
-            OAuthClient::new(client_config)
-                .map_err(|e| anyhow::anyhow!("Failed to create OAuth client: {}", e))?
-        );
-
-        // Try to load valid cached token or refresh
-        let initial_token = match token_cache.load_or_refresh(server_name, &oauth_client).await {
-            Ok(token) => {
-                info!("Using cached/refreshed token for server: {}", server_name);
-                token
+        // Try cached token first (with auto-refresh if expired)
+        if let Some((token, refresh, client_id, secret)) = OAuthDiscovery::load_cached_token(endpoint) {
+            if !OAuthDiscovery::is_token_expired(endpoint) {
+                info!("Using cached OAuth token for: {}", server_name);
+                return Ok(Arc::new(StaticTokenProvider::new(token)));
             }
-            Err(_) => {
-                // No valid cached token, perform full OAuth flow
-                let token = Self::perform_oauth_flow(server_name, oauth_config).await?;
-                // Save to cache for future use
-                if let Err(e) = token_cache.save(server_name, &token) {
-                    warn!("Failed to cache OAuth token: {}", e);
+            // Try refresh
+            if let Some(ref r) = refresh {
+                let discovery = OAuthDiscovery::with_credentials(Some(client_id.clone()), secret.clone(), None)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+                if let Ok(new_token) = discovery.refresh_token(endpoint, r, &client_id, secret.as_deref()).await {
+                    info!("Token refreshed for: {}", server_name);
+                    return Ok(Arc::new(StaticTokenProvider::new(new_token.access_token)));
                 }
-                token
             }
-        };
+        }
 
-        // Create the token provider
-        let provider = OAuthTokenProvider::new(
-            server_name.to_string(),
-            oauth_client,
-            token_cache.clone(),
-            Some(initial_token),
-        );
-
-        Ok(Arc::new(provider))
+        // Full OAuth flow
+        let token = Self::perform_oauth_flow(server_name, endpoint, oauth_config).await?;
+        Ok(Arc::new(StaticTokenProvider::new(token.access_token)))
     }
 
     /// Ensure a client is connected, using cached connection state
@@ -230,8 +202,8 @@ impl MultiplexingStrategy {
     /// Perform full OAuth flow for a server that requires authentication.
     ///
     /// Opens browser for user authentication and exchanges the code for a token.
-    /// Saves the token to cache after successful authentication.
-    async fn perform_oauth_flow(server_name: &str, oauth_config: &OAuthConfig) -> Result<ClientToken> {
+    /// Saves the token to cache (keyed by endpoint URL) after successful authentication.
+    async fn perform_oauth_flow(server_name: &str, endpoint: &str, oauth_config: &OAuthConfig) -> Result<ClientToken> {
         use tokio::net::TcpListener;
 
         info!("Starting OAuth flow for server: {}", server_name);
@@ -301,6 +273,18 @@ impl MultiplexingStrategy {
             .exchange_code(&code, &state)
             .await
             .map_err(|e| anyhow::anyhow!("Failed to exchange authorization code: {}", e))?;
+
+        // Save token to unified cache (keyed by endpoint URL)
+        if let Err(e) = OAuthDiscovery::save_token_to_cache(
+            endpoint,
+            &token.access_token,
+            token.refresh_token.as_deref(),
+            token.expires_at,
+            &oauth_config.client_id,
+            oauth_config.client_secret.as_deref(),
+        ) {
+            warn!("Failed to cache OAuth token: {}", e);
+        }
 
         eprintln!("✓ OAuth authentication successful!\n");
 
