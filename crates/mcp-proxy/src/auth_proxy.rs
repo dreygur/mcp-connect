@@ -230,13 +230,6 @@ impl AuthenticatedProxy {
         false
     }
 
-    pub async fn get_authorization_header(&self, session_id: &str) -> Option<String> {
-        let sessions = self.authenticated_sessions.read().await;
-        sessions.get(session_id).map(|token| {
-            format!("Bearer {}", token.access_token)
-        })
-    }
-
     pub async fn authorize_request(&self, session_id: &str, _method: &str) -> Result<()> {
         if !self.config.require_auth {
             return Ok(());
