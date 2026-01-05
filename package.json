@@ -1,6 +1,6 @@
 {
   "name": "mcp-connect",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Bridge local MCP clients to remote MCP servers with OAuth support",
   "author": "Rakibul Yeasin <ryeasin03@gmail.com>",
   "license": "MIT",
