@@ -1,6 +1,6 @@
 {
   "name": "@dreygur/mcp",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "publishConfig": {
     "access": "public"
   },
@@ -25,6 +25,7 @@
     "llm"
   ],
   "bin": {
+    "mcp": "bin/cli.js",
     "mcp-connect": "bin/cli.js"
   },
   "scripts": {
