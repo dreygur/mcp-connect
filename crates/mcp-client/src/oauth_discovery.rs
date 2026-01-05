@@ -651,6 +651,16 @@ impl OAuthDiscovery {
                 .get("error_description")
                 .map(|s| s.as_str())
                 .unwrap_or("Unknown error");
+
+            // Send error page to browser
+            let error_html = Self::error_page(error, description);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{}",
+                error_html
+            );
+            writer.write_all(response.as_bytes()).await.ok();
+            writer.flush().await.ok();
+
             return Err(ClientError::OAuthError(format!(
                 "OAuth error: {} - {}",
                 error, description
@@ -672,20 +682,172 @@ impl OAuthDiscovery {
             .clone();
 
         // Send success response to browser
-        let response = "HTTP/1.1 200 OK\r\n\
-            Content-Type: text/html\r\n\
-            Connection: close\r\n\r\n\
-            <!DOCTYPE html>\
-            <html><head><title>Authentication Successful</title></head>\
-            <body style=\"font-family: system-ui; text-align: center; padding: 50px;\">\
-            <h1 style=\"color: #22c55e;\">✓ Authentication Successful</h1>\
-            <p>You can close this window and return to the terminal.</p>\
-            </body></html>";
-
+        let success_html = Self::success_page();
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{}",
+            success_html
+        );
         writer.write_all(response.as_bytes()).await.ok();
         writer.flush().await.ok();
 
         Ok((code, state))
+    }
+
+    fn success_page() -> String {
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Successful</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 48px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            max-width: 400px;
+            animation: slideUp 0.5s ease-out;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .icon {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            animation: scaleIn 0.3s ease-out 0.2s both;
+        }
+        @keyframes scaleIn {
+            from { transform: scale(0); }
+            to { transform: scale(1); }
+        }
+        .icon svg {
+            width: 40px;
+            height: 40px;
+            stroke: white;
+            stroke-width: 3;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+        .checkmark { stroke-dasharray: 50; stroke-dashoffset: 50; animation: draw 0.5s ease-out 0.5s forwards; }
+        @keyframes draw { to { stroke-dashoffset: 0; } }
+        h1 { color: #1f2937; font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+        p { color: #6b7280; font-size: 15px; line-height: 1.5; }
+        .hint { margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">
+            <svg viewBox="0 0 24 24"><path class="checkmark" d="M5 12l5 5L19 7"/></svg>
+        </div>
+        <h1>Authentication Successful</h1>
+        <p>You have been successfully authenticated.<br>You can now close this window.</p>
+        <p class="hint">Return to your terminal to continue</p>
+    </div>
+</body>
+</html>"#.to_string()
+    }
+
+    fn error_page(error: &str, description: &str) -> String {
+        format!(r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Failed</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+        }}
+        .card {{
+            background: white;
+            border-radius: 16px;
+            padding: 48px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+            max-width: 440px;
+            animation: slideUp 0.5s ease-out;
+        }}
+        @keyframes slideUp {{
+            from {{ opacity: 0; transform: translateY(20px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        .icon {{
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 24px;
+            animation: scaleIn 0.3s ease-out 0.2s both;
+        }}
+        @keyframes scaleIn {{
+            from {{ transform: scale(0); }}
+            to {{ transform: scale(1); }}
+        }}
+        .icon svg {{
+            width: 40px;
+            height: 40px;
+            stroke: white;
+            stroke-width: 3;
+            fill: none;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }}
+        h1 {{ color: #1f2937; font-size: 24px; font-weight: 600; margin-bottom: 8px; }}
+        p {{ color: #6b7280; font-size: 15px; line-height: 1.5; }}
+        .error-code {{
+            margin-top: 20px;
+            padding: 12px 16px;
+            background: #fef2f2;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #991b1b;
+            word-break: break-word;
+        }}
+        .hint {{ margin-top: 24px; padding-top: 24px; border-top: 1px solid #e5e7eb; font-size: 13px; color: #9ca3af; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </div>
+        <h1>Authentication Failed</h1>
+        <p>{}</p>
+        <div class="error-code">{}</div>
+        <p class="hint">Please close this window and try again</p>
+    </div>
+</body>
+</html>"#, description, error)
     }
 }
 
