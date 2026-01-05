@@ -349,12 +349,6 @@ impl OAuthClient {
         Ok(refreshed.access_token)
     }
 
-    pub async fn revoke_token(&self) -> Result<()> {
-        let mut token = self.token.write().await;
-        *token = None;
-        Ok(())
-    }
-
     pub fn parse_callback_url(&self, callback_url: &str) -> Result<(String, String)> {
         let url = url::Url::parse(callback_url)
             .map_err(|e| ClientError::OAuthError(format!("Invalid callback URL: {}", e)))?;
@@ -377,10 +371,6 @@ impl OAuthClient {
     pub async fn set_token(&self, token: ClientToken) {
         let mut current_token = self.token.write().await;
         *current_token = Some(token);
-    }
-
-    pub fn get_authorization_header(&self, access_token: &str) -> String {
-        format!("Bearer {}", access_token)
     }
 }
 
