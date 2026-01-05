@@ -3,8 +3,22 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
 [![npm](https://img.shields.io/npm/v/@dreygur/mcp)](https://www.npmjs.com/package/@dreygur/mcp)
+[![GitHub stars](https://img.shields.io/github/stars/dreygur/mcp-connect?style=social)](https://github.com/dreygur/mcp-connect/stargazers)
 
 A production-ready proxy and multiplexing server for the Model Context Protocol (MCP). MCP Connect enables seamless integration between local MCP clients and remote HTTP servers with OAuth support.
+
+## Works With
+
+Connect your favorite AI agents to remote MCP servers:
+
+| Agent | Description |
+|-------|-------------|
+| [Claude Desktop](https://claude.ai/download) | Anthropic's official desktop app |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI coding assistant |
+| [Cursor](https://cursor.sh/) | AI-powered code editor |
+| [Windsurf](https://codeium.com/windsurf) | Codeium's AI IDE |
+| [Zed](https://zed.dev/) | High-performance code editor |
+| [Continue](https://continue.dev/) | Open-source AI assistant for VSCode/JetBrains |
 
 ## Features
 
@@ -162,6 +176,12 @@ See [Contributing Guide](docs/contributing.md) for details.
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+If you find MCP Connect useful, please consider giving it a star on GitHub! It helps others discover the project.
+
+[![Star on GitHub](https://img.shields.io/github/stars/dreygur/mcp-connect?style=social)](https://github.com/dreygur/mcp-connect)
 
 ## Acknowledgments
 
