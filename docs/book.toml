@@ -1,7 +1,6 @@
 [book]
 authors = ["Rakibul Yeasin"]
 language = "en"
-multilingual = false
 src = "."
 title = "MCP Connect"
 
