@@ -1,0 +1,46 @@
+{
+  "name": "mcp-connect",
+  "version": "0.3.0",
+  "description": "Bridge local MCP clients to remote MCP servers with OAuth support",
+  "author": "Rakibul Yeasin <ryeasin03@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dreygur/mcp-connect.git"
+  },
+  "homepage": "https://github.com/dreygur/mcp-connect#readme",
+  "bugs": {
+    "url": "https://github.com/dreygur/mcp-connect/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "proxy",
+    "cli",
+    "oauth",
+    "ai",
+    "llm"
+  ],
+  "bin": {
+    "mcp-connect": "bin/cli.js"
+  },
+  "scripts": {
+    "postinstall": "node scripts/install.js"
+  },
+  "files": [
+    "bin",
+    "scripts"
+  ],
+  "engines": {
+    "node": ">=14"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

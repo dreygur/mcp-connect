@@ -2,3 +2,9 @@
 .env
 dist
 .mcp-connect.json
+
+# npm
+node_modules
+bin/mcp-connect
+bin/mcp-connect.exe
+!bin/cli.js

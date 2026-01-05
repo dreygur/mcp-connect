@@ -1,0 +1,21 @@
+# Source code
+/crates
+/target
+/dist
+*.rs
+Cargo.toml
+Cargo.lock
+
+# Git/CI
+.git
+.github
+.gitignore
+
+# Docs
+*.md
+!README.md
+
+# Config
+.env
+.mcp-connect.json
+rustfmt.toml
