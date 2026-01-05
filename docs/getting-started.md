@@ -2,6 +2,23 @@
 
 This guide will walk you through setting up MCP Connect from scratch.
 
+## Quick Connection (No Config Needed)
+
+Connect to a remote MCP server instantly:
+
+```bash
+# Basic connection
+npx @dreygur/mcp https://remote.mcp.server/sse
+
+# With authentication
+npx @dreygur/mcp https://api.example.com/mcp --auth-token "your_token"
+
+# With custom headers
+npx @dreygur/mcp https://api.example.com/mcp --headers "X-Api-Key:your_key"
+```
+
+This is perfect for testing or one-off connections. For managing multiple servers, continue below.
+
 ## Prerequisites
 
 - MCP Connect installed (see [Installation Guide](installation.md))

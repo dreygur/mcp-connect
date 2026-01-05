@@ -62,6 +62,17 @@ Download from [releases page](https://github.com/dreygur/mcp-connect/releases) f
 
 ## Quick Start
 
+**One-off connection (no config needed):**
+```bash
+npx @dreygur/mcp https://remote.mcp.server/sse
+```
+
+**With auth token:**
+```bash
+npx @dreygur/mcp https://api.example.com/mcp --auth-token "your_token"
+```
+
+**Multi-server setup:**
 ```bash
 # Initialize configuration
 mcp-connect init

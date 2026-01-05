@@ -12,11 +12,15 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Parser)]
 #[command(name = "mcp-connect")]
 #[command(about = "MCP Connect - Bridge local MCP clients to remote MCP servers")]
-#[command(version = "0.1.0")]
+#[command(version = "0.3.1")]
 struct Cli {
+    /// Remote server URL for quick connection (e.g., mcp-connect https://server.com/mcp)
+    #[arg(value_name = "URL")]
+    url: Option<String>,
+
     /// The subcommand to execute
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 
     /// Enable debug logging for detailed troubleshooting
     #[arg(long, global = true, help = "Enable debug logging")]
@@ -25,6 +29,14 @@ struct Cli {
     /// Set the log level (trace, debug, info, warn, error)
     #[arg(long, global = true, help = "Set log level")]
     log_level: Option<String>,
+
+    /// HTTP headers in key:value format (for quick connection)
+    #[arg(long, help = "HTTP headers", value_delimiter = ',')]
+    headers: Option<Vec<String>>,
+
+    /// Authorization token (for quick connection)
+    #[arg(long, help = "Bearer token")]
+    auth_token: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -344,9 +356,36 @@ fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    setup_logging(cli.debug, cli.log_level)?;
+    setup_logging(cli.debug, cli.log_level.clone())?;
 
-    let result = match cli.command {
+    // Quick connection mode: mcp-connect <url>
+    if let Some(url) = cli.url {
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return commands::proxy::run_proxy(
+                url,
+                None,  // fallbacks
+                30,    // timeout
+                3,     // retry_attempts
+                1000,  // retry_delay
+                cli.headers,
+                cli.auth_token,
+                None,  // api_key
+                None,  // user_agent
+                None,  // oauth_client_id
+                None,  // oauth_client_secret
+                8085,  // oauth_redirect_port
+                cli.debug,
+            ).await;
+        }
+    }
+
+    let Some(command) = cli.command else {
+        eprintln!("Usage: mcp-connect <URL> or mcp-connect <COMMAND>");
+        eprintln!("Run 'mcp-connect --help' for more information.");
+        std::process::exit(1);
+    };
+
+    let result = match command {
         Commands::Init { force } => {
             commands::init::init(force)
         }
