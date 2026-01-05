@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use mcp_client::{
-    McpRemoteClient, OAuthClient, OAuthClientConfig, OAuthDiscovery,
+    McpRemoteClient, OAuthDiscovery, OAuthMetadata,
     TokenProvider, ClientToken, StaticTokenProvider,
 };
 use mcp_config::ConfigManager;
@@ -14,7 +14,7 @@ use rmcp::model::{Implementation, InitializeResult, ProtocolVersion, ServerCapab
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Run the multiplexing server.
 pub async fn serve(debug: bool) -> Result<()> {
@@ -200,81 +200,38 @@ impl MultiplexingStrategy {
     }
 
     /// Perform full OAuth flow for a server that requires authentication.
-    ///
-    /// Opens browser for user authentication and exchanges the code for a token.
-    /// Saves the token to cache (keyed by endpoint URL) after successful authentication.
     async fn perform_oauth_flow(server_name: &str, endpoint: &str, oauth_config: &OAuthConfig) -> Result<ClientToken> {
-        use tokio::net::TcpListener;
-
         info!("Starting OAuth flow for server: {}", server_name);
 
-        // Convert from mcp_types::OAuthConfig to mcp_client::OAuthClientConfig
-        let client_config = OAuthClientConfig {
-            client_id: oauth_config.client_id.clone(),
-            client_secret: oauth_config.client_secret.clone(),
-            auth_url: oauth_config.auth_url.clone(),
-            token_url: oauth_config.token_url.clone(),
-            redirect_url: oauth_config.redirect_url.clone(),
-            scopes: oauth_config.scopes.clone(),
-            use_pkce: oauth_config.use_pkce,
-        };
-
-        let oauth_client = OAuthClient::new(client_config)
-            .map_err(|e| anyhow::anyhow!("Failed to create OAuth client: {}", e))?;
-
-        // Generate authorization URL
-        let auth_url = oauth_client
-            .generate_auth_url()
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to generate auth URL: {}", e))?;
-
-        // Extract port from redirect URL for the callback server
+        // Extract port from redirect URL
         let redirect_url = url::Url::parse(&oauth_config.redirect_url)
             .context("Invalid redirect URL in OAuth config")?;
         let port = redirect_url.port().unwrap_or(8085);
-        let callback_path = redirect_url.path();
 
-        // Start local server to receive callback
-        let listener = TcpListener::bind(format!("127.0.0.1:{}", port))
-            .await
-            .context("Failed to start OAuth callback server")?;
+        // Create discovery with explicit credentials
+        let discovery = OAuthDiscovery::with_credentials(
+            Some(oauth_config.client_id.clone()),
+            oauth_config.client_secret.clone(),
+            Some(port),
+        ).map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        info!("OAuth callback server listening on port {}", port);
+        // Build metadata from config
+        let metadata = OAuthMetadata {
+            authorization_endpoint: oauth_config.auth_url.clone(),
+            token_endpoint: oauth_config.token_url.clone(),
+            revocation_endpoint: None,
+            registration_endpoint: None,
+            response_types_supported: vec!["code".to_string()],
+            grant_types_supported: vec!["authorization_code".to_string(), "refresh_token".to_string()],
+            code_challenge_methods_supported: if oauth_config.use_pkce { vec!["S256".to_string()] } else { vec![] },
+            scopes_supported: oauth_config.scopes.clone(),
+        };
 
-        // Print instructions for user
-        eprintln!("\n╔════════════════════════════════════════════════════════════════╗");
-        eprintln!("║                    OAuth Authentication Required                ║");
-        eprintln!("╠════════════════════════════════════════════════════════════════╣");
-        eprintln!("║ Server: {:<54} ║", server_name);
-        eprintln!("╠════════════════════════════════════════════════════════════════╣");
-        eprintln!("║ Please open the following URL in your browser:                 ║");
-        eprintln!("╚════════════════════════════════════════════════════════════════╝");
-        eprintln!("\n{}\n", auth_url);
-        eprintln!("Waiting for authorization callback...\n");
+        // Use OAuthDiscovery to handle the browser flow
+        let token = discovery.authenticate(&metadata, Some(oauth_config.scopes.clone())).await
+            .map_err(|e| anyhow::anyhow!("OAuth authentication failed: {}", e))?;
 
-        // Try to open browser automatically
-        if let Err(e) = open::that(&auth_url) {
-            debug!("Could not open browser automatically: {}", e);
-        }
-
-        // Wait for callback with timeout
-        let callback_result = tokio::time::timeout(
-            std::time::Duration::from_secs(300), // 5 minute timeout
-            Self::wait_for_oauth_callback(&listener, callback_path),
-        )
-        .await
-        .context("OAuth authentication timed out")?
-        .context("Failed to receive OAuth callback")?;
-
-        let (code, state) = callback_result;
-
-        // Exchange code for token
-        let token = oauth_client
-            .exchange_code(&code, &state)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to exchange authorization code: {}", e))?;
-
-        // Save token to unified cache (keyed by endpoint URL)
+        // Save token to cache
         if let Err(e) = OAuthDiscovery::save_token_to_cache(
             endpoint,
             &token.access_token,
@@ -286,81 +243,7 @@ impl MultiplexingStrategy {
             warn!("Failed to cache OAuth token: {}", e);
         }
 
-        eprintln!("✓ OAuth authentication successful!\n");
-
         Ok(token)
-    }
-
-    /// Wait for OAuth callback on the local server.
-    async fn wait_for_oauth_callback(
-        listener: &tokio::net::TcpListener,
-        expected_path: &str,
-    ) -> Result<(String, String)> {
-        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-
-        let (mut socket, _) = listener.accept().await?;
-        let (reader, mut writer) = socket.split();
-        let mut reader = BufReader::new(reader);
-
-        // Read the HTTP request
-        let mut request_line = String::new();
-        reader.read_line(&mut request_line).await?;
-
-        debug!("Received OAuth callback request: {}", request_line.trim());
-
-        // Parse the request to extract code and state
-        let parts: Vec<&str> = request_line.split_whitespace().collect();
-        if parts.len() < 2 {
-            anyhow::bail!("Invalid HTTP request");
-        }
-
-        let path_and_query = parts[1];
-
-        // Parse query parameters
-        let url = url::Url::parse(&format!("http://localhost{}", path_and_query))
-            .context("Failed to parse callback URL")?;
-
-        // Check if this is the expected callback path
-        if !url.path().starts_with(expected_path.trim_end_matches('/')) {
-            anyhow::bail!("Unexpected callback path: {}", url.path());
-        }
-
-        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
-
-        // Check for error response
-        if let Some(error) = params.get("error") {
-            let description = params
-                .get("error_description")
-                .map(|s| s.as_str())
-                .unwrap_or("Unknown error");
-            anyhow::bail!("OAuth error: {} - {}", error, description);
-        }
-
-        let code = params
-            .get("code")
-            .context("Missing authorization code in callback")?
-            .clone();
-
-        let state = params
-            .get("state")
-            .context("Missing state parameter in callback")?
-            .clone();
-
-        // Send success response to browser
-        let response = "HTTP/1.1 200 OK\r\n\
-            Content-Type: text/html\r\n\
-            Connection: close\r\n\r\n\
-            <!DOCTYPE html>\
-            <html><head><title>Authentication Successful</title></head>\
-            <body style=\"font-family: system-ui; text-align: center; padding: 50px;\">\
-            <h1>✓ Authentication Successful</h1>\
-            <p>You can close this window and return to the terminal.</p>\
-            </body></html>";
-
-        writer.write_all(response.as_bytes()).await?;
-        writer.flush().await?;
-
-        Ok((code, state))
     }
 
     /// Route a request to the appropriate server based on namespace.
