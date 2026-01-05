@@ -1,62 +1,14 @@
-//! # MCP Connect CLI
-//!
-//! Command-line interface for the Model Context Protocol (MCP) remote proxy system.
-//!
-//! This application bridges local MCP clients with remote MCP servers, providing:
-//! - Multiple transport support (HTTP, STDIO, TCP)
-//! - Authentication handling (Bearer tokens, API keys, OAuth 2.1)
-//! - Fallback mechanisms and load balancing
-//! - Comprehensive logging and debugging
-//! - Central configuration management
-//! - MCP Registry integration
-//!
-//! ## Usage
-//!
-//! Initialize new project:
-//! ```bash
-//! mcp-connect init
-//! ```
-//!
-//! Add servers from registry:
-//! ```bash
-//! mcp-connect config add github modelcontextprotocol/github-mcp-server
-//! ```
-//!
-//! Start multiplexing server:
-//! ```bash
-//! mcp-connect serve
-//! ```
-//!
-//! ## Commands
-//!
-//! - `init`: Initialize new configuration
-//! - `registry`: Search and browse MCP Registry (supports custom registry sources)
-//! - `config`: Manage server configurations
-//! - `serve`: Run multiplexing server
-//! - `generate`: Generate IDE configurations
-//! - `proxy`: Run as STDIO proxy (legacy)
-//! - `test`: Test connection to remote server
-//! - `load-balance`: Distribute requests across multiple servers
+//! MCP Connect CLI - Bridge local MCP clients to remote MCP servers.
 
 mod commands;
 mod transport;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use mcp_client::{McpRemoteClient, OAuthDiscovery, OAuthRequirement};
-use mcp_proxy::{stdio_proxy::StdioProxyBuilder, strategy::{ForwardingStrategy, LoadBalancingStrategy}};
-use mcp_types::{TransportType, McpClient, LogLevel};
-use serde_json::json;
 use std::io::{self, Write};
-use std::sync::Arc;
-use std::time::Duration;
-use tracing::{error, info, warn, Level};
+use tracing::{error, Level};
 use tracing_subscriber::FmtSubscriber;
 
-/// Command-line interface for MCP Connect.
-///
-/// This structure defines the main CLI interface using clap, providing
-/// global options and subcommands for different proxy operations.
 #[derive(Parser)]
 #[command(name = "mcp-connect")]
 #[command(about = "MCP Connect - Bridge local MCP clients to remote MCP servers")]
@@ -345,464 +297,46 @@ enum Commands {
 }
 
 
-// Simple function to send MCP notifications to STDOUT
-fn send_mcp_notification(level: LogLevel, message: &str) {
-    let notification = json!({
-        "jsonrpc": "2.0",
-        "method": "notifications/message",
-        "params": {
-            "level": level,
-            "logger": "mcp-proxy",
-            "data": message
-        }
-    });
-
-    if let Ok(json_str) = serde_json::to_string(&notification) {
-        println!("{}", json_str);
-        let _ = io::stdout().flush();
-    }
-}
-
-// Custom writer that either writes to stderr (debug mode) or discards (non-debug mode)
-struct ConditionalWriter {
-    debug_mode: bool,
-}
+struct ConditionalWriter { debug_mode: bool }
 
 impl ConditionalWriter {
-    fn new(debug_mode: bool) -> Self {
-        Self { debug_mode }
-    }
+    fn new(debug_mode: bool) -> Self { Self { debug_mode } }
 }
 
 impl Write for ConditionalWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        if self.debug_mode {
-            // In debug mode, write to stderr so it doesn't interfere with STDIO MCP protocol
-            io::stderr().write(buf)
-        } else {
-            // In non-debug mode, discard the output
-            Ok(buf.len())
-        }
+        if self.debug_mode { io::stderr().write(buf) } else { Ok(buf.len()) }
     }
-
     fn flush(&mut self) -> io::Result<()> {
-        if self.debug_mode {
-            io::stderr().flush()
-        } else {
-            Ok(())
-        }
+        if self.debug_mode { io::stderr().flush() } else { Ok(()) }
     }
 }
 
 impl tracing_subscriber::fmt::MakeWriter<'_> for ConditionalWriter {
     type Writer = Self;
-
-    fn make_writer(&self) -> Self::Writer {
-        ConditionalWriter::new(self.debug_mode)
-    }
+    fn make_writer(&self) -> Self::Writer { ConditionalWriter::new(self.debug_mode) }
 }
 
 fn setup_logging(debug: bool, log_level: Option<String>) -> Result<()> {
-    let level = if debug {
-        Level::DEBUG
-    } else if let Some(level_str) = log_level {
-        match level_str.to_lowercase().as_str() {
-            "trace" => Level::TRACE,
-            "debug" => Level::DEBUG,
-            "info" => Level::INFO,
-            "warn" => Level::WARN,
-            "error" => Level::ERROR,
-            _ => return Err(anyhow::anyhow!("Invalid log level: {}", level_str)),
-        }
-    } else {
-        Level::INFO
+    let level = match (debug, log_level.as_deref()) {
+        (true, _) => Level::DEBUG,
+        (_, Some("trace")) => Level::TRACE,
+        (_, Some("debug")) => Level::DEBUG,
+        (_, Some("info")) => Level::INFO,
+        (_, Some("warn")) => Level::WARN,
+        (_, Some("error")) => Level::ERROR,
+        (_, Some(l)) => return Err(anyhow::anyhow!("Invalid log level: {}", l)),
+        _ => Level::INFO,
     };
-
-    let writer = ConditionalWriter::new(debug);
 
     let subscriber = FmtSubscriber::builder()
         .with_max_level(level)
         .with_target(false)
         .with_thread_ids(false)
         .with_thread_names(false)
-        .with_writer(writer)
+        .with_writer(ConditionalWriter::new(debug))
         .finish();
-
     tracing::subscriber::set_global_default(subscriber)?;
-    Ok(())
-}
-
-async fn run_auth(
-    endpoint: String,
-    oauth_client_id: Option<String>,
-    oauth_client_secret: Option<String>,
-    oauth_redirect_port: u16,
-    clear: bool,
-) -> Result<()> {
-    if clear {
-        info!("Clearing cached OAuth token for: {}", endpoint);
-        mcp_client::OAuthDiscovery::clear_cached_token(&endpoint)?;
-        println!("Cleared cached token for {}", endpoint);
-        return Ok(());
-    }
-
-    info!("Pre-authenticating with: {}", endpoint);
-
-    // Check if already have a valid token
-    if let Some((token, _, _, _)) = mcp_client::OAuthDiscovery::load_cached_token(&endpoint) {
-        println!("Found cached token for {}", endpoint);
-        println!("Token (first 20 chars): {}...", &token[..token.len().min(20)]);
-        println!("\nTo re-authenticate, run: mcp-connect auth --endpoint {} --clear", endpoint);
-        return Ok(());
-    }
-
-    let discovery = OAuthDiscovery::with_credentials(
-        oauth_client_id.clone(),
-        oauth_client_secret.clone(),
-        Some(oauth_redirect_port),
-    )?;
-
-    // Check if OAuth is required
-    match discovery.check_oauth_required(&endpoint).await {
-        Ok(OAuthRequirement::NotRequired) => {
-            println!("OAuth not required for this endpoint");
-            Ok(())
-        }
-        Ok(OAuthRequirement::Required(metadata)) => {
-            println!("OAuth required, starting authentication flow...");
-            println!("A browser window will open for authentication.\n");
-
-            match discovery.authenticate(&metadata, None).await {
-                Ok(token) => {
-                    // Cache the token
-                    let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
-                    mcp_client::OAuthDiscovery::save_token_to_cache(
-                        &endpoint,
-                        &token.access_token,
-                        token.refresh_token.as_deref(),
-                        token.expires_at,
-                        client_id,
-                        oauth_client_secret.as_deref(),
-                    )?;
-
-                    println!("\n✓ Authentication successful!");
-                    println!("Token cached. You can now use this endpoint with Claude CLI:");
-                    println!("\n  claude mcp add myserver -- mcp-connect proxy --endpoint {}", endpoint);
-                    Ok(())
-                }
-                Err(e) => {
-                    Err(anyhow::anyhow!("OAuth authentication failed: {}", e))
-                }
-            }
-        }
-        Ok(OAuthRequirement::RequiredButNoMetadata(reason)) => {
-            Err(anyhow::anyhow!("OAuth required but discovery failed: {}", reason))
-        }
-        Err(e) => {
-            Err(anyhow::anyhow!("Failed to check OAuth: {}", e))
-        }
-    }
-}
-
-async fn run_notification_demo(count: u32) -> Result<()> {
-    info!("Starting MCP Notification Demo");
-
-    // Send a few different types of notifications
-    for i in 1..=count {
-        match i % 4 {
-            1 => {
-                send_mcp_notification(LogLevel::Info, &format!("Demo info message {}", i));
-                info!("Sent info notification {}", i);
-            }
-            2 => {
-                send_mcp_notification(LogLevel::Warn, &format!("Demo warning message {}", i));
-                warn!("Sent warning notification {}", i);
-            }
-            3 => {
-                send_mcp_notification(LogLevel::Error, &format!("Demo error message {}", i));
-                error!("Sent error notification {}", i);
-            }
-            0 => {
-                send_mcp_notification(LogLevel::Debug, &format!("Demo debug message {}", i));
-                info!("Sent debug notification {}", i);
-            }
-            _ => unreachable!(),
-        }
-
-        // Small delay between notifications
-        tokio::time::sleep(Duration::from_millis(500)).await;
-    }
-
-    info!("Notification demo completed");
-    Ok(())
-}
-
-async fn run_proxy(
-    endpoint: String,
-    fallbacks: Option<Vec<String>>,
-    timeout: u64,
-    retry_attempts: u32,
-    retry_delay: u64,
-    headers: Option<Vec<String>>,
-    auth_token: Option<String>,
-    api_key: Option<String>,
-    user_agent: Option<String>,
-    oauth_client_id: Option<String>,
-    oauth_client_secret: Option<String>,
-    oauth_redirect_port: u16,
-    debug: bool,
-) -> Result<()> {
-    info!("Starting MCP Connect");
-    info!("Primary endpoint: {}", endpoint);
-
-    // Send MCP notification that proxy is starting
-    send_mcp_notification(LogLevel::Info, &format!("MCP Proxy starting with endpoint: {}", endpoint));
-
-    let fallback_transports = if let Some(fallbacks) = fallbacks {
-        transport::parse_fallback_transports(&fallbacks)?
-    } else {
-        vec![TransportType::Stdio, TransportType::Tcp]
-    };
-
-    info!("Fallback transports: {:?}", fallback_transports);
-
-    // Check if OAuth is required (only if no auth token provided)
-    let final_auth_token = if auth_token.is_some() {
-        auth_token
-    } else {
-        // First, check for cached token
-        let cached_result = if let Some((cached_token, refresh_token, client_id, client_secret)) =
-            mcp_client::OAuthDiscovery::load_cached_token(&endpoint)
-        {
-            // Check if token is expired and needs refresh
-            if mcp_client::OAuthDiscovery::is_token_expired(&endpoint) {
-                if let Some(ref refresh) = refresh_token {
-                    info!("Token expired, attempting refresh...");
-                    let discovery = OAuthDiscovery::with_credentials(
-                        oauth_client_id.clone().or(Some(client_id.clone())),
-                        oauth_client_secret.clone().or(client_secret.clone()),
-                        Some(oauth_redirect_port),
-                    )?;
-                    match discovery.refresh_token(&endpoint, refresh, &client_id, client_secret.as_deref()).await {
-                        Ok(new_token) => {
-                            info!("Token refreshed successfully");
-                            Some(new_token.access_token)
-                        }
-                        Err(e) => {
-                            warn!("Token refresh failed: {}, will re-authenticate", e);
-                            None // Need to re-authenticate
-                        }
-                    }
-                } else {
-                    info!("Token expired and no refresh token, need to re-authenticate");
-                    None
-                }
-            } else {
-                info!("Using cached OAuth token");
-                Some(cached_token)
-            }
-        } else {
-            None
-        };
-
-        // If we have a valid token from cache/refresh, use it
-        if cached_result.is_some() {
-            cached_result
-        } else {
-            // Auto-discover OAuth if needed
-            info!("Checking if OAuth authentication is required...");
-            let discovery = OAuthDiscovery::with_credentials(
-                oauth_client_id.clone(),
-                oauth_client_secret.clone(),
-                Some(oauth_redirect_port),
-            )?;
-
-            match discovery.check_oauth_required(&endpoint).await {
-                Ok(OAuthRequirement::NotRequired) => {
-                    info!("OAuth not required for this endpoint");
-                    None
-                }
-                Ok(OAuthRequirement::Required(metadata)) => {
-                    info!("OAuth required, starting authentication flow...");
-                    send_mcp_notification(LogLevel::Info, "OAuth authentication required, please check terminal for authorization URL");
-
-                    match discovery.authenticate(&metadata, None).await {
-                        Ok(token) => {
-                            info!("OAuth authentication successful");
-                            send_mcp_notification(LogLevel::Info, "OAuth authentication successful");
-
-                            // Cache the token for future use
-                            let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
-                            if let Err(e) = mcp_client::OAuthDiscovery::save_token_to_cache(
-                                &endpoint,
-                                &token.access_token,
-                                token.refresh_token.as_deref(),
-                                token.expires_at,
-                                client_id,
-                                oauth_client_secret.as_deref(),
-                            ) {
-                                warn!("Failed to cache OAuth token: {}", e);
-                            }
-
-                            Some(token.access_token)
-                        }
-                        Err(e) => {
-                            error!("OAuth authentication failed: {}", e);
-                            send_mcp_notification(LogLevel::Error, &format!("OAuth authentication failed: {}", e));
-                            return Err(anyhow::anyhow!("OAuth authentication failed: {}", e));
-                        }
-                    }
-                }
-                Ok(OAuthRequirement::RequiredButNoMetadata(reason)) => {
-                    warn!("OAuth may be required but metadata discovery failed: {}", reason);
-                    warn!("Attempting to connect without authentication...");
-                    None
-                }
-                Err(e) => {
-                    warn!("Failed to check OAuth requirement: {}", e);
-                    warn!("Attempting to connect without authentication...");
-                    None
-                }
-            }
-        }
-    };
-
-    // Build primary transport config with headers
-    let primary_config = transport::build_transport_config(
-        endpoint.clone(),
-        timeout,
-        retry_attempts,
-        retry_delay,
-        headers,
-        final_auth_token,
-        api_key,
-        user_agent,
-    )?;
-
-    let client = McpRemoteClient::new_with_config(primary_config, fallback_transports);
-    let strategy = Arc::new(ForwardingStrategy::new(client));
-
-    let proxy = StdioProxyBuilder::new()
-        .with_strategy(strategy)
-        .with_debug_mode(debug)
-        .build()?;
-
-    info!("Proxy ready, listening on STDIO");
-
-    // Send MCP notification that proxy is ready
-    send_mcp_notification(LogLevel::Info, "MCP Proxy ready and listening for requests");
-    proxy.run().await?;
-
-    Ok(())
-}
-
-async fn run_load_balance(
-    endpoints: Vec<String>,
-    transport: String,
-    timeout: u64,
-    retry_attempts: u32,
-    retry_delay: u64,
-    headers: Option<Vec<String>>,
-    auth_token: Option<String>,
-    api_key: Option<String>,
-    user_agent: Option<String>,
-    debug: bool,
-) -> Result<()> {
-    info!("Starting MCP Load Balancing Proxy");
-    info!("Endpoints: {:?}", endpoints);
-    info!("Transport: {}", transport);
-
-    let transport_type = transport::parse_transport_type(&transport)?;
-    let mut clients = Vec::new();
-
-    for endpoint in endpoints {
-        let config = transport::build_transport_config(
-            endpoint.clone(),
-            timeout,
-            retry_attempts,
-            retry_delay,
-            headers.clone(),
-            auth_token.clone(),
-            api_key.clone(),
-            user_agent.clone(),
-        )?;
-
-        let transports = vec![(transport_type.clone(), config)];
-        let client = McpRemoteClient::with_custom_transports(transports).await;
-        clients.push(client);
-        info!("Added client for endpoint: {}", endpoint);
-    }
-
-    if clients.is_empty() {
-        return Err(anyhow::anyhow!("No clients configured"));
-    }
-
-    let strategy = Arc::new(LoadBalancingStrategy::new(clients));
-
-    let proxy = StdioProxyBuilder::new()
-        .with_strategy(strategy)
-        .with_debug_mode(debug)
-        .build()?;
-
-    info!("Load balancing proxy ready, listening on STDIO");
-    proxy.run().await?;
-
-    Ok(())
-}
-
-async fn test_connection(
-    endpoint: String,
-    transport: String,
-    timeout: u64,
-    headers: Option<Vec<String>>,
-    auth_token: Option<String>,
-    api_key: Option<String>,
-    user_agent: Option<String>,
-) -> Result<()> {
-    info!("Testing connection to: {}", endpoint);
-    info!("Transport: {}", transport);
-
-    let transport_type = transport::parse_transport_type(&transport)?;
-    let config = transport::build_transport_config(
-        endpoint.clone(),
-        timeout,
-        1, // retry_attempts
-        100, // retry_delay
-        headers,
-        auth_token,
-        api_key,
-        user_agent,
-    )?;
-
-    let transports = vec![(transport_type, config)];
-    let client = McpRemoteClient::with_custom_transports(transports).await;
-
-    // Test connection
-    info!("Connecting...");
-    let mut client = client;
-    client.connect().await?;
-
-    info!("Initializing...");
-    let init_result = client.initialize().await?;
-    info!("Server info: {} v{}", init_result.server_info.name, init_result.server_info.version);
-    info!("Protocol version: {:?}", init_result.protocol_version);
-
-    info!("Testing tools list...");
-    match client.list_tools().await {
-        Ok(tools) => info!("Tools: {}", tools),
-        Err(e) => warn!("Failed to list tools: {}", e),
-    }
-
-    info!("Testing resources list...");
-    match client.list_resources().await {
-        Ok(resources) => info!("Resources: {}", resources),
-        Err(e) => warn!("Failed to list resources: {}", e),
-    }
-
-    info!("Disconnecting...");
-    client.disconnect().await?;
-
-    info!("Connection test completed successfully!");
     Ok(())
 }
 
@@ -884,93 +418,45 @@ async fn main() -> Result<()> {
         }
 
         Commands::Proxy {
-            endpoint,
-            fallbacks,
-            timeout,
-            retry_attempts,
-            retry_delay,
-            headers,
-            auth_token,
-            api_key,
-            user_agent,
-            oauth_client_id,
-            oauth_client_secret,
-            oauth_redirect_port,
+            endpoint, fallbacks, timeout, retry_attempts, retry_delay,
+            headers, auth_token, api_key, user_agent,
+            oauth_client_id, oauth_client_secret, oauth_redirect_port,
         } => {
-            run_proxy(
-                endpoint,
-                fallbacks,
-                timeout,
-                retry_attempts,
-                retry_delay,
-                headers,
-                auth_token,
-                api_key,
-                user_agent,
-                oauth_client_id,
-                oauth_client_secret,
-                oauth_redirect_port,
-                cli.debug
+            commands::proxy::run_proxy(
+                endpoint, fallbacks, timeout, retry_attempts, retry_delay,
+                headers, auth_token, api_key, user_agent,
+                oauth_client_id, oauth_client_secret, oauth_redirect_port, cli.debug,
             ).await
         }
 
         Commands::LoadBalance {
-            endpoints,
-            transport,
-            timeout,
-            retry_attempts,
-            retry_delay,
-            headers,
-            auth_token,
-            api_key,
-            user_agent,
+            endpoints, transport, timeout, retry_attempts, retry_delay,
+            headers, auth_token, api_key, user_agent,
         } => {
-            run_load_balance(
-                endpoints,
-                transport,
-                timeout,
-                retry_attempts,
-                retry_delay,
-                headers,
-                auth_token,
-                api_key,
-                user_agent,
-                cli.debug
+            commands::proxy::run_load_balance(
+                endpoints, transport, timeout, retry_attempts, retry_delay,
+                headers, auth_token, api_key, user_agent, cli.debug,
             ).await
         }
 
         Commands::Test {
-            endpoint,
-            transport,
-            timeout,
-            headers,
-            auth_token,
-            api_key,
-            user_agent,
+            endpoint, transport, timeout, headers, auth_token, api_key, user_agent,
         } => {
-            test_connection(
-                endpoint,
-                transport,
-                timeout,
-                headers,
-                auth_token,
-                api_key,
-                user_agent,
+            commands::proxy::test_connection(
+                endpoint, transport, timeout, headers, auth_token, api_key, user_agent,
             ).await
         }
 
         Commands::NotificationDemo { count } => {
-            run_notification_demo(count).await
+            commands::proxy::run_notification_demo(count).await
         }
 
         Commands::Auth {
-            endpoint,
-            oauth_client_id,
-            oauth_client_secret,
-            oauth_redirect_port,
-            clear,
+            endpoint, oauth_client_id, oauth_client_secret, oauth_redirect_port, clear,
         } => {
-            run_auth(endpoint, oauth_client_id, oauth_client_secret, oauth_redirect_port, clear).await
+            commands::proxy::run_auth(
+                endpoint, oauth_client_id, oauth_client_secret, oauth_redirect_port, clear,
+            ).await
         }
     };
 

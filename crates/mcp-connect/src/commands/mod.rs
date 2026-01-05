@@ -3,5 +3,6 @@
 pub mod config;
 pub mod generate;
 pub mod init;
+pub mod proxy;
 pub mod registry;
 pub mod serve;
