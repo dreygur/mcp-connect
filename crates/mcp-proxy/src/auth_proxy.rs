@@ -1,6 +1,5 @@
 use crate::error::{ProxyError, Result};
 use mcp_client::{OAuthClient, OAuthClientConfig, ClientToken};
-use mcp_server::{OAuthManager, OAuthConfig};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -9,7 +8,6 @@ use tracing::{debug, info, warn};
 
 #[derive(Debug, Clone)]
 pub struct AuthProxyConfig {
-    pub server_oauth: Option<OAuthConfig>,
     pub client_oauth: Option<OAuthClientConfig>,
     pub require_auth: bool,
     pub token_validation_endpoint: Option<String>,
@@ -17,23 +15,12 @@ pub struct AuthProxyConfig {
 
 pub struct AuthenticatedProxy {
     config: AuthProxyConfig,
-    #[allow(dead_code)]
-    server_oauth: Option<Arc<OAuthManager>>,
     client_oauth: Option<Arc<OAuthClient>>,
     authenticated_sessions: Arc<RwLock<HashMap<String, ClientToken>>>,
 }
 
 impl AuthenticatedProxy {
     pub fn new(config: AuthProxyConfig) -> Result<Self> {
-        let server_oauth = if let Some(server_config) = config.server_oauth.clone() {
-            Some(Arc::new(
-                OAuthManager::new(server_config)
-                    .map_err(|e| ProxyError::Auth(format!("Failed to create OAuth manager: {}", e)))?
-            ))
-        } else {
-            None
-        };
-
         let client_oauth = if let Some(client_config) = config.client_oauth.clone() {
             Some(Arc::new(
                 OAuthClient::new(client_config)
@@ -45,7 +32,6 @@ impl AuthenticatedProxy {
 
         Ok(Self {
             config,
-            server_oauth,
             client_oauth,
             authenticated_sessions: Arc::new(RwLock::new(HashMap::new())),
         })
@@ -307,7 +293,6 @@ mod tests {
 
     fn create_test_config() -> AuthProxyConfig {
         AuthProxyConfig {
-            server_oauth: None,
             client_oauth: None,
             require_auth: false,
             token_validation_endpoint: None,
