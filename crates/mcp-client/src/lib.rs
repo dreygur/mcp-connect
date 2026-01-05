@@ -3,6 +3,7 @@ pub mod transport;
 pub mod error;
 pub mod auth;
 pub mod oauth_discovery;
+mod templates;
 
 pub use client::McpRemoteClient;
 pub use error::ClientError;
