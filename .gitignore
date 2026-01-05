@@ -2,6 +2,7 @@
 .env
 dist
 .mcp-connect.json
+/book
 
 # npm
 node_modules

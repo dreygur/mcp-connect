@@ -1,0 +1,14 @@
+[book]
+authors = ["Rakibul Yeasin"]
+language = "en"
+multilingual = false
+src = "."
+title = "MCP Connect Documentation"
+
+[build]
+build-dir = "../book"
+
+[output.html]
+site-url = "/mcp-connect/"
+git-repository-url = "https://github.com/dreygur/mcp-connect"
+edit-url-template = "https://github.com/dreygur/mcp-connect/edit/main/docs/{path}"

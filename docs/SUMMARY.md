@@ -1,67 +1,32 @@
-# Documentation Summary
+# Summary
 
-This directory contains comprehensive documentation for MCP Connect.
+[Introduction](README.md)
 
-## Documentation Structure
+# Getting Started
 
-### Getting Started
-- **[Installation Guide](installation.md)** - Install MCP Connect on all platforms
-- **[Getting Started](getting-started.md)** - Quick start tutorial for new users
+- [Installation](installation.md)
+- [Getting Started](getting-started.md)
 
-### Configuration
-- **[Configuration Reference](configuration.md)** - Complete configuration documentation
-  - Server configuration
-  - Remote transport settings
-  - Routing configuration
-  - Registry sources
-  - Environment variables
+# Configuration
 
-### IDE Integration
-- **[Zed Setup](ide-setup/zed.md)** - Configure MCP Connect with Zed
-- **[VSCode Setup](ide-setup/vscode.md)** - Configure MCP Connect with VSCode
-- **[Cursor Setup](ide-setup/cursor.md)** - Configure MCP Connect with Cursor
+- [Configuration Reference](configuration.md)
 
-### Features
-- **[Registry Management](registry.md)** - Working with MCP registries
-  - Official MCP Registry
-  - Custom registry sources
-  - Registry commands
+# IDE Integration
 
-### Advanced Topics
-- **[Advanced Usage](advanced.md)** - Power user features
-  - Custom transport configuration
-  - Performance optimization
-  - Security best practices
-  - Scripting and automation
+- [Zed Setup](ide-setup/zed.md)
+- [VSCode Setup](ide-setup/vscode.md)
+- [Cursor Setup](ide-setup/cursor.md)
 
-- **[Troubleshooting](troubleshooting.md)** - Common issues and solutions
-  - Installation issues
-  - Configuration problems
-  - Connection errors
-  - IDE integration issues
+# Features
 
-### Developer Resources
-- **[API Reference](api-reference.md)** - Complete API documentation
-  - Core types
-  - Configuration management
-  - Registry client
-  - MCP client
-  - Error types
+- [Registry Management](registry.md)
 
-- **[Contributing Guide](contributing.md)** - How to contribute
-  - Development setup
-  - Code style guidelines
-  - Testing procedures
-  - Pull request process
+# Advanced Topics
 
-## Quick Navigation
+- [Advanced Usage](advanced.md)
+- [Troubleshooting](troubleshooting.md)
 
-**New Users**: Start with [Installation](installation.md) → [Getting Started](getting-started.md)
+# Developer Resources
 
-**IDE Setup**: See [IDE Setup Guides](ide-setup/)
-
-**Configuration**: See [Configuration Reference](configuration.md)
-
-**Problems?**: Check [Troubleshooting](troubleshooting.md)
-
-**Contributing**: See [Contributing Guide](contributing.md)
+- [API Reference](api-reference.md)
+- [Contributing Guide](contributing.md)
