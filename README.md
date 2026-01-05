@@ -2,126 +2,85 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![npm](https://img.shields.io/npm/v/mcp-connect)](https://www.npmjs.com/package/mcp-connect)
 
-A powerful, production-ready proxy and multiplexing server for the Model Context Protocol (MCP). MCP Connect enables seamless integration between local MCP clients and remote HTTP servers, providing centralized configuration management, multi-server support, and comprehensive IDE integration.
+A production-ready proxy and multiplexing server for the Model Context Protocol (MCP). MCP Connect enables seamless integration between local MCP clients and remote HTTP servers with OAuth support.
 
-## ✨ Features
+## Features
 
-- **🔌 Remote Server Support** - Connect to multiple remote MCP servers via HTTP/HTTPS
-- **📦 Centralized Configuration** - Manage all servers in a single `.mcp-connect.json` file
-- **🔍 Registry Integration** - Search and discover servers from the official MCP Registry
-- **🌐 Custom Registry Sources** - Add and manage custom registry sources beyond the official one
-- **🔀 Multiplexing** - Access multiple servers through a single connection with namespace routing
-- **🔐 Secure Credentials** - Environment variable-based authentication with `.env` support
-- **💻 IDE Integration** - Auto-generate configuration files for Zed, VSCode, and Cursor
-- **📡 Protocol Compliance** - Full MCP 2024-11-05 specification support
-- **🔄 Retry & Resilience** - Automatic retry logic and connection management
-- **📊 Comprehensive Logging** - Debug and production logging modes
+- **Remote Server Support** - Connect to multiple remote MCP servers via HTTP/HTTPS
+- **OAuth Authentication** - Automatic OAuth 2.0 flow with token caching
+- **Centralized Configuration** - Manage all servers in a single `.mcp-connect.json` file
+- **Registry Integration** - Search and discover servers from the official MCP Registry
+- **Multiplexing** - Access multiple servers through a single connection with namespace routing
+- **IDE Integration** - Auto-generate configuration for Zed, VSCode, and Cursor
 
-## 🚀 Quick Start
-
-### Installation
+## Installation
 
 ```bash
+# npm (recommended)
+npm install -g mcp-connect
+
+# Cargo
+cargo install --git https://github.com/dreygur/mcp-connect
+
 # From source
 git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
-cargo build --release
-
-# Or from release
-# Linux/Mac
-curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
-# Windows
-irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
-
-
-# Install globally
 cargo install --path crates/mcp-connect
-
-# Or from github
-cargo install --git https://github.com/dreygur/mcp-connect
-
-# Or use pre-built binaries (when available)
-# Download from releases page
 ```
 
-### Basic Usage
+Pre-built binaries are available on the [releases page](https://github.com/dreygur/mcp-connect/releases).
+
+## Quick Start
 
 ```bash
-# 1. Initialize your project
+# Initialize configuration
 mcp-connect init
 
-# 2. Add servers from the registry
+# Add a server from registry
 mcp-connect config add github modelcontextprotocol/github-mcp-server
 
-# 3. Configure credentials in .env
-echo "GITHUB_TOKEN=your_token_here" >> .env
+# Configure credentials
+echo "GITHUB_TOKEN=your_token" >> .env
 
-# 4. Generate IDE configuration
+# Generate IDE configuration
 mcp-connect generate --ide vscode
 
-# 5. Start the server (usually automatic via IDE)
+# Start the server
 mcp-connect serve
 ```
 
-## 📚 Documentation
+## Documentation
 
-Comprehensive documentation is available in the [`docs/`](docs/) directory:
+Full documentation is available at [dreygur.js.org/mcp-connect](https://dreygur.js.org/mcp-connect/)
 
-- **[Installation Guide](docs/installation.md)** - Detailed installation instructions for all platforms
-- **[Getting Started](docs/getting-started.md)** - Step-by-step tutorial for new users
-- **[Configuration Reference](docs/configuration.md)** - Complete configuration file documentation
-- **[IDE Setup Guides](docs/ide-setup/)** - IDE-specific setup instructions
-  - [Zed](docs/ide-setup/zed.md)
-  - [VSCode](docs/ide-setup/vscode.md)
-  - [Cursor](docs/ide-setup/cursor.md)
-- **[Registry Management](docs/registry.md)** - Working with the MCP Registry and custom sources
-- **[Advanced Usage](docs/advanced.md)** - Power user features and customization
-- **[Troubleshooting](docs/troubleshooting.md)** - Common issues and solutions
-- **[API Reference](docs/api-reference.md)** - Complete API documentation
+- [Installation Guide](docs/installation.md)
+- [Getting Started](docs/getting-started.md)
+- [Configuration Reference](docs/configuration.md)
+- [IDE Setup](docs/ide-setup/) - Zed, VSCode, Cursor
+- [Registry Management](docs/registry.md)
+- [Troubleshooting](docs/troubleshooting.md)
 
-## 🏗️ Architecture
-
-MCP Connect is built as a modular Rust workspace with the following components:
+## Architecture
 
 ```
 crates/
-├── mcp-types/      # Common types, traits, and error definitions
-├── mcp-server/     # Server-side MCP implementation (STDIO)
+├── mcp-types/      # Common types and traits
+├── mcp-server/     # Server-side MCP (STDIO)
 ├── mcp-client/     # Client for remote HTTP servers
-├── mcp-proxy/      # Message forwarding and routing logic
+├── mcp-proxy/      # Message forwarding and routing
 ├── mcp-registry/   # MCP Registry API client
-├── mcp-config/     # Configuration management and validation
-└── mcp-connect/     # Command-line interface
+├── mcp-config/     # Configuration management
+└── mcp-connect/    # CLI
 ```
 
-For detailed architecture information, see [ARCHITECTURE.md](ARCHITECTURE.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
-## 📋 Requirements
-
-- **Rust**: 1.75 or later
-- **Cargo**: Latest stable version
-- **OpenSSL**: 3.x (or build with static linking)
-
-## 🎯 Use Cases
-
-### Multi-Server Management
-Manage multiple remote MCP servers from a single configuration file, avoiding the need to configure each server individually in your IDE.
-
-### Custom Registry Sources
-Add your own MCP registry sources for private or internal server catalogs.
-
-### Development Workflow
-Integrate MCP servers into your development environment with automatic configuration generation for popular IDEs.
-
-### Production Deployment
-Deploy MCP Connect as a service to provide centralized access to multiple MCP servers across your team.
-
-## 🔧 Configuration Example
+## Configuration Example
 
 ```json
 {
-  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/mcp-connect-config.schema.json",
   "version": "1.0",
   "envFile": ".env",
   "routing": {
@@ -130,7 +89,7 @@ Deploy MCP Connect as a service to provide centralized access to multiple MCP se
   },
   "servers": {
     "github": {
-      "name": "io.github.modelcontextprotocol/github-mcp-server",
+      "name": "github-mcp-server",
       "remote": {
         "type": "streamable-http",
         "url": "https://api.githubcopilot.com/mcp",
@@ -146,33 +105,20 @@ Deploy MCP Connect as a service to provide centralized access to multiple MCP se
 }
 ```
 
-## 🤝 Contributing
+## Requirements
 
-We welcome contributions! Please see our [Contributing Guide](docs/contributing.md) for details.
+- Rust 1.75+ (for building from source)
+- Node.js 14+ (for npm installation)
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Contributing
 
-## 📄 License
+See [Contributing Guide](docs/contributing.md) for details.
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## License
 
-## 🙏 Acknowledgments
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Acknowledgments
 
 - [RMCP](https://docs.rs/rmcp) - Rust SDK for Model Context Protocol
 - [Tokio](https://tokio.rs/) - Asynchronous runtime for Rust
-- [Clap](https://clap.rs/) - Command Line Argument Parser
-- [Serde](https://serde.rs/) - Serialization framework
-
-## 📞 Support
-
-- **Documentation**: See the [`docs/`](docs/) directory
-- **Issues**: [GitHub Issues](https://github.com/dreygur/mcp-connect/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/dreygur/mcp-connect/discussions)
-
----
-
-**Built with ❤️ in Rust 🦀**
