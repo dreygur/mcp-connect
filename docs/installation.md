@@ -7,7 +7,7 @@
 The easiest way to install MCP Connect:
 
 ```bash
-npm install -g mcp-connect
+npm install -g @dreygur/mcp
 ```
 
 **Requirements:** Node.js 14+

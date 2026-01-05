@@ -3,7 +3,7 @@ authors = ["Rakibul Yeasin"]
 language = "en"
 multilingual = false
 src = "."
-title = "MCP Connect Documentation"
+title = "MCP Connect"
 
 [build]
 build-dir = "../book"
@@ -12,3 +12,22 @@ build-dir = "../book"
 site-url = "/mcp-connect/"
 git-repository-url = "https://github.com/dreygur/mcp-connect"
 edit-url-template = "https://github.com/dreygur/mcp-connect/edit/main/docs/{path}"
+default-theme = "ayu"
+preferred-dark-theme = "ayu"
+smart-punctuation = true
+mathjax-support = false
+copy-fonts = true
+no-section-label = false
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-hierarchical-levels = true
+
+[output.html.playground]
+editable = false
+copy-js = true

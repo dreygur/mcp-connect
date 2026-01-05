@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![npm](https://img.shields.io/npm/v/mcp-connect)](https://www.npmjs.com/package/mcp-connect)
+[![npm](https://img.shields.io/npm/v/@dreygur/mcp)](https://www.npmjs.com/package/@dreygur/mcp)
 
 A production-ready proxy and multiplexing server for the Model Context Protocol (MCP). MCP Connect enables seamless integration between local MCP clients and remote HTTP servers with OAuth support.
 
@@ -20,7 +20,7 @@ A production-ready proxy and multiplexing server for the Model Context Protocol 
 ### npm (recommended)
 
 ```bash
-npm install -g mcp-connect
+npm install -g @dreygur/mcp
 ```
 
 ### Shell script (Linux/macOS)
