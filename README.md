@@ -17,20 +17,48 @@ A production-ready proxy and multiplexing server for the Model Context Protocol 
 
 ## Installation
 
-```bash
-# npm (recommended)
-npm install -g mcp-connect
+### npm (recommended)
 
-# Cargo
+```bash
+npm install -g mcp-connect
+```
+
+### Shell script (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
+```
+
+### PowerShell (Windows)
+
+```powershell
+irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
+```
+
+### Cargo
+
+```bash
+# From GitHub
 cargo install --git https://github.com/dreygur/mcp-connect
 
-# From source
+# From crates.io (when published)
+cargo install mcp-connect
+```
+
+### From source
+
+```bash
 git clone https://github.com/dreygur/mcp-connect.git
 cd mcp-connect
 cargo install --path crates/mcp-connect
 ```
 
-Pre-built binaries are available on the [releases page](https://github.com/dreygur/mcp-connect/releases).
+### Pre-built binaries
+
+Download from [releases page](https://github.com/dreygur/mcp-connect/releases) for:
+- Linux (x86_64)
+- macOS (x86_64, ARM64)
+- Windows (x86_64)
 
 ## Quick Start
 
@@ -107,8 +135,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for details.
 
 ## Requirements
 
-- Rust 1.75+ (for building from source)
 - Node.js 14+ (for npm installation)
+- Rust 1.75+ (for building from source)
 
 ## Contributing
 

@@ -1,153 +1,138 @@
 # Installation Guide
 
-This guide covers installing MCP Connect on various platforms and methods.
-
-## Prerequisites
-
-- **Rust**: Version 1.75 or later
-- **Cargo**: Latest stable version (comes with Rust)
-- **OpenSSL**: 3.x (for SSL/TLS support)
-
 ## Installation Methods
 
-### Method 1: From Source (Recommended)
+### npm (recommended)
 
-This is the recommended method for getting the latest features and bug fixes.
+The easiest way to install MCP Connect:
 
 ```bash
-# Clone the repository
-git clone https://github.com/dreygur/mcp-connect.git
-cd mcp-connect
-
-# Build in release mode
-cargo build --release
-
-# The binary will be at: target/release/mcp-connect
+npm install -g mcp-connect
 ```
 
-**Install globally:**
+**Requirements:** Node.js 14+
+
+### Shell script (Linux/macOS)
+
+One-line install with automatic platform detection:
+
 ```bash
-cargo install --path crates/mcp-connect
+curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
 ```
 
-This installs `mcp-connect` to your Cargo bin directory (usually `~/.cargo/bin/`).
+This downloads the latest release, verifies checksum, and installs to `/usr/local/bin`.
 
-### Method 2: Using Cargo (from crates.io)
+### PowerShell (Windows)
 
-When published to crates.io:
+```powershell
+irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
+```
+
+This installs to `C:\Program Files\mcp-connect` and adds it to PATH.
+
+### Cargo (from GitHub)
+
+```bash
+cargo install --git https://github.com/dreygur/mcp-connect
+```
+
+**Requirements:** Rust 1.75+, OpenSSL 3.x
+
+### Cargo (from crates.io)
+
+When published:
 
 ```bash
 cargo install mcp-connect
 ```
 
-### Method 3: Pre-built Binaries
+### From source
 
-Download pre-built binaries from the [Releases](https://github.com/dreygur/mcp-connect/releases) page.
-
-**Linux:**
 ```bash
-wget https://github.com/dreygur/mcp-connect/releases/latest/download/mcp-connect-x86_64-unknown-linux-gnu.tar.gz
-tar -xzf mcp-connect-x86_64-unknown-linux-gnu.tar.gz
+git clone https://github.com/dreygur/mcp-connect.git
+cd mcp-connect
+cargo install --path crates/mcp-connect
+```
+
+Or build without installing:
+
+```bash
+cargo build --release
+# Binary at: target/release/mcp-connect
+```
+
+### Pre-built binaries
+
+Download from the [releases page](https://github.com/dreygur/mcp-connect/releases):
+
+| Platform | Architecture | File |
+|----------|-------------|------|
+| Linux | x86_64 | `mcp-connect-linux-x86_64.tar.gz` |
+| macOS | x86_64 | `mcp-connect-darwin-x86_64.tar.gz` |
+| macOS | ARM64 | `mcp-connect-darwin-aarch64.tar.gz` |
+| Windows | x86_64 | `mcp-connect-windows-x86_64.zip` |
+
+**Linux/macOS:**
+```bash
+tar -xzf mcp-connect-*.tar.gz
+chmod +x mcp-connect
 sudo mv mcp-connect /usr/local/bin/
 ```
 
-**macOS:**
-download from releases page
-
 **Windows:**
-Download the `.exe` from the releases page and add to your PATH.
+Extract the zip and add the folder to your PATH.
 
-## Platform-Specific Instructions
+## Platform-Specific Notes
 
 ### Linux (Ubuntu/Debian)
 
 ```bash
-# Install OpenSSL
+# Install dependencies for building from source
 sudo apt update
-sudo apt install libssl3 libssl-dev
+sudo apt install libssl-dev pkg-config
 
-# Install Rust (if not already installed)
+# Install Rust if needed
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Build MCP Connect
-git clone https://github.com/dreygur/mcp-connect.git
-cd mcp-connect
-cargo build --release
 ```
 
 ### Linux (Fedora/RHEL)
 
 ```bash
-# Install OpenSSL
-sudo dnf install openssl-devel
-
-# Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Build MCP Connect
-git clone https://github.com/dreygur/mcp-connect.git
-cd mcp-connect
-cargo build --release
+sudo dnf install openssl-devel pkg-config
 ```
 
 ### macOS
 
 ```bash
-# Install OpenSSL via Homebrew
-brew install openssl
-
-# Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Build MCP Connect
-git clone https://github.com/dreygur/mcp-connect.git
-cd mcp-connect
-cargo build --release
+# Install OpenSSL via Homebrew (for building from source)
+brew install openssl pkg-config
 ```
 
 ### Windows
 
-**Using Rustup (recommended):**
+For building from source, install OpenSSL via [vcpkg](https://vcpkg.io/) or use pre-built binaries.
 
-1. Download and run [rustup-init.exe](https://rustup.rs/)
-2. Install OpenSSL (via vcpkg or pre-built binaries)
-3. Clone and build:
+## Static linking (optional)
 
-```powershell
-git clone https://github.com/dreygur/mcp-connect.git
-cd mcp-connect
-cargo build --release
-```
-
-## Static Linking (Optional)
-
-For better portability, you can build with statically linked OpenSSL:
+For portable binaries without OpenSSL dependency:
 
 ```bash
-# Install pkg-config
-# Linux: sudo apt install pkg-config
-# macOS: brew install pkg-config
-
-# Build with static OpenSSL
 OPENSSL_STATIC=1 cargo build --release
 ```
 
-## Verifying Installation
-
-After installation, verify it works:
+## Verify installation
 
 ```bash
 mcp-connect --version
 mcp-connect --help
 ```
 
-## Troubleshooting Installation
+## Troubleshooting
 
-### OpenSSL Errors
+### OpenSSL errors
 
-**Error**: `libssl.so.3: cannot open shared object file`
+**Error:** `libssl.so.3: cannot open shared object file`
 
-**Solution**:
 ```bash
 # Ubuntu/Debian
 sudo apt install libssl3
@@ -155,33 +140,24 @@ sudo apt install libssl3
 # Fedora/RHEL
 sudo dnf install openssl-libs
 
-# Or build with static OpenSSL
+# Or build with static linking
 OPENSSL_STATIC=1 cargo build --release
 ```
 
-### Rust Version Errors
+### Permission errors
 
-**Error**: `error: edition 2021 is unstable`
+```bash
+chmod +x mcp-connect
+# Or add cargo bin to PATH
+export PATH="$HOME/.cargo/bin:$PATH"
+```
 
-**Solution**: Update Rust:
+### Rust version errors
+
 ```bash
 rustup update stable
 ```
 
-### Permission Errors
+## Next steps
 
-**Error**: `Permission denied` when running `mcp-connect`
-
-**Solution**:
-```bash
-# Make executable
-chmod +x target/release/mcp-connect
-
-# Or add to PATH
-export PATH="$HOME/.cargo/bin:$PATH"
-```
-
-## Next Steps
-
-After installation, proceed to the [Getting Started Guide](getting-started.md) to set up your first MCP Connect configuration.
-
+See [Getting Started](getting-started.md) to configure your first MCP server.
