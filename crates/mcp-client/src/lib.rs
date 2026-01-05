@@ -8,7 +8,7 @@ pub use client::McpRemoteClient;
 pub use error::ClientError;
 pub use transport::{HttpTransport, StdioTransport, TcpTransport};
 pub use auth::{
-    OAuthClient, OAuthClientConfig, ClientToken, TokenCache, CachedToken,
-    TokenProvider, StaticTokenProvider, OAuthTokenProvider,
+    OAuthClient, OAuthClientConfig, ClientToken,
+    TokenProvider, StaticTokenProvider,
 };
 pub use oauth_discovery::{OAuthDiscovery, OAuthMetadata, OAuthRequirement};
