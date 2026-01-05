@@ -17,7 +17,13 @@ A production-ready proxy and multiplexing server for the Model Context Protocol 
 
 ## Installation
 
-### npm (recommended)
+### npx (no install)
+
+```bash
+npx @dreygur/mcp https://remote.server/mcp
+```
+
+### npm (global install)
 
 ```bash
 npm install -g @dreygur/mcp

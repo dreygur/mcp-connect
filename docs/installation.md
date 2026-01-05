@@ -2,9 +2,17 @@
 
 ## Installation Methods
 
-### npm (recommended)
+### npx (no install)
 
-The easiest way to install MCP Connect:
+Run directly without installing:
+
+```bash
+npx @dreygur/mcp https://remote.server/mcp
+```
+
+### npm (global install)
+
+Install globally for repeated use:
 
 ```bash
 npm install -g @dreygur/mcp
