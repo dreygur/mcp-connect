@@ -55,6 +55,15 @@ function download(url) {
   });
 }
 
+function cleanupTempFiles(destDir) {
+  const tempFiles = ["tmp.tar.gz", "tmp.zip"];
+  for (const file of tempFiles) {
+    try {
+      fs.unlinkSync(path.join(destDir, file));
+    } catch {}
+  }
+}
+
 function extract(buffer, destDir, isWindows) {
   const tmpFile = path.join(destDir, isWindows ? "tmp.zip" : "tmp.tar.gz");
   fs.writeFileSync(tmpFile, buffer);
@@ -69,7 +78,7 @@ function extract(buffer, destDir, isWindows) {
       execSync(`tar -xzf "${tmpFile}" -C "${destDir}"`, { stdio: "pipe" });
     }
   } finally {
-    fs.unlinkSync(tmpFile);
+    cleanupTempFiles(destDir);
   }
 }
 
