@@ -46,13 +46,13 @@ npm install -g @dreygur/mcp
 ### Shell script (Linux/macOS)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/scripts/install.sh | bash
 ```
 
 ### PowerShell (Windows)
 
 ```powershell
-irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/scripts/install.ps1 | iex
 ```
 
 ### Cargo

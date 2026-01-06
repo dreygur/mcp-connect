@@ -25,7 +25,7 @@ npm install -g @dreygur/mcp
 One-line install with automatic platform detection:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/dreygur/mcp-connect/main/scripts/install.sh | bash
 ```
 
 This downloads the latest release, verifies checksum, and installs to `/usr/local/bin`.
@@ -33,7 +33,7 @@ This downloads the latest release, verifies checksum, and installs to `/usr/loca
 ### PowerShell (Windows)
 
 ```powershell
-irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/dreygur/mcp-connect/main/scripts/install.ps1 | iex
 ```
 
 This installs to `C:\Program Files\mcp-connect` and adds it to PATH.
