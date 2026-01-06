@@ -12,7 +12,7 @@ use tracing_subscriber::FmtSubscriber;
 #[derive(Parser)]
 #[command(name = "mcp-connect")]
 #[command(about = "MCP Connect - Bridge local MCP clients to remote MCP servers")]
-#[command(version = "0.3.3")]
+#[command(version = env!("CARGO_PKG_VERSION"))]
 struct Cli {
     /// Remote server URL for quick connection (e.g., mcp-connect https://server.com/mcp)
     #[arg(value_name = "URL")]

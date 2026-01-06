@@ -30,6 +30,12 @@ pub struct ClientToken {
     pub refresh_token: Option<String>,
     pub expires_at: Option<u64>,
     pub scope: Vec<String>,
+    /// Client ID used for this token (needed for refresh)
+    #[serde(default)]
+    pub client_id: Option<String>,
+    /// Client secret used for this token (needed for refresh)
+    #[serde(default)]
+    pub client_secret: Option<String>,
 }
 
 /// OAuth token response from the authorization server
@@ -217,6 +223,8 @@ impl OAuthClient {
             refresh_token: token_response.refresh_token,
             expires_at,
             scope,
+            client_id: Some(self.config.client_id.clone()),
+            client_secret: self.config.client_secret.clone(),
         };
 
         info!("Successfully exchanged authorization code for access token");
@@ -310,6 +318,8 @@ impl OAuthClient {
             refresh_token: token_response.refresh_token,
             expires_at,
             scope,
+            client_id: Some(self.config.client_id.clone()),
+            client_secret: self.config.client_secret.clone(),
         };
 
         info!("Successfully refreshed access token");

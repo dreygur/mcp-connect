@@ -68,10 +68,15 @@ async fn get_oauth_token(
             let token = discovery.authenticate(&metadata, None).await
                 .map_err(|e| anyhow::anyhow!("OAuth authentication failed: {}", e))?;
 
-            let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
+            // Use the actual client_id from token (from dynamic registration) or fallback
+            let client_id = token.client_id.as_deref()
+                .or(oauth_client_id.as_deref())
+                .unwrap_or("dynamic");
+            let client_secret = token.client_secret.as_deref()
+                .or(oauth_client_secret.as_deref());
             OAuthDiscovery::save_token_to_cache(
                 endpoint, &token.access_token, token.refresh_token.as_deref(),
-                token.expires_at, client_id, oauth_client_secret.as_deref(),
+                token.expires_at, client_id, client_secret,
             ).ok();
 
             send_notification(LogLevel::Info, "OAuth authentication successful");
@@ -233,10 +238,15 @@ pub async fn run_auth(
             let token = discovery.authenticate(&metadata, None).await
                 .map_err(|e| anyhow::anyhow!("OAuth failed: {}", e))?;
 
-            let client_id = oauth_client_id.as_deref().unwrap_or("dynamic");
+            // Use the actual client_id from token (from dynamic registration) or fallback
+            let client_id = token.client_id.as_deref()
+                .or(oauth_client_id.as_deref())
+                .unwrap_or("dynamic");
+            let client_secret = token.client_secret.as_deref()
+                .or(oauth_client_secret.as_deref());
             OAuthDiscovery::save_token_to_cache(
                 &endpoint, &token.access_token, token.refresh_token.as_deref(),
-                token.expires_at, client_id, oauth_client_secret.as_deref(),
+                token.expires_at, client_id, client_secret,
             )?;
 
             println!("\n✓ Authentication successful!");

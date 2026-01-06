@@ -33,7 +33,7 @@ impl RegistryClient {
     /// * `api_version` - Optional API version path (e.g., "v1", "v0.1"). If None, uses default.
     pub fn with_base_url(base_url: &str, api_version: Option<&str>) -> Result<Self> {
         let client = reqwest::Client::builder()
-            .user_agent("mcp-connect/0.1.0")
+            .user_agent(concat!("mcp-registry/", env!("CARGO_PKG_VERSION")))
             .build()
             .context("Failed to create HTTP client")?;
 

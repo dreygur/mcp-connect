@@ -117,6 +117,8 @@ impl AuthenticatedProxy {
             refresh_token: refresh_token.map(|rt| rt.to_string()),
             expires_at,
             scope: vec![], // Default empty scope
+            client_id: None,
+            client_secret: None,
         };
 
         // Validate token if endpoint is configured

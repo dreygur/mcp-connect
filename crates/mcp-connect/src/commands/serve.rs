@@ -108,7 +108,7 @@ impl MultiplexingStrategy {
                 headers,
                 auth_token: None,
                 token_provider,
-                user_agent: Some("mcp-connect/0.1.0".to_string()),
+                user_agent: Some(format!("mcp-connect/{}", env!("CARGO_PKG_VERSION"))),
             };
 
             let fallbacks = vec![]; // No fallbacks for multiplexing (each server is HTTP only)
@@ -231,14 +231,16 @@ impl MultiplexingStrategy {
         let token = discovery.authenticate(&metadata, Some(oauth_config.scopes.clone())).await
             .map_err(|e| anyhow::anyhow!("OAuth authentication failed: {}", e))?;
 
-        // Save token to cache
+        // Save token to cache - prefer token's client_id (from dynamic registration) over config
+        let client_id = token.client_id.as_deref().unwrap_or(&oauth_config.client_id);
+        let client_secret = token.client_secret.as_deref().or(oauth_config.client_secret.as_deref());
         if let Err(e) = OAuthDiscovery::save_token_to_cache(
             endpoint,
             &token.access_token,
             token.refresh_token.as_deref(),
             token.expires_at,
-            &oauth_config.client_id,
-            oauth_config.client_secret.as_deref(),
+            client_id,
+            client_secret,
         ) {
             warn!("Failed to cache OAuth token: {}", e);
         }

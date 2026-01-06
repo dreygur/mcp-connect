@@ -270,6 +270,8 @@ impl OAuthDiscovery {
             refresh_token: token_response.refresh_token.or_else(|| Some(refresh_token.to_string())),
             expires_at,
             scope: vec![],
+            client_id: Some(client_id.to_string()),
+            client_secret: client_secret.map(|s| s.to_string()),
         };
 
         // Update cache with new token
