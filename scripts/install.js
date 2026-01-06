@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const https = require("https");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const { execSync, spawnSync } = require("child_process");
@@ -56,12 +57,17 @@ function download(url) {
 }
 
 function cleanupTempFiles(destDir) {
-  const tempFiles = ["tmp.tar.gz", "tmp.zip"];
+  const tempFiles = ["tmp.tar.gz", "tmp.zip", "tmp.sha256"];
   for (const file of tempFiles) {
     try {
       fs.unlinkSync(path.join(destDir, file));
     } catch {}
   }
+}
+
+function verifyChecksum(buffer, expectedHash) {
+  const actualHash = crypto.createHash("sha256").update(buffer).digest("hex");
+  return actualHash.toLowerCase() === expectedHash.toLowerCase();
 }
 
 function extract(buffer, destDir, isWindows) {
@@ -85,11 +91,25 @@ function extract(buffer, destDir, isWindows) {
 async function install() {
   const { target, ext, isWindows } = getPlatformInfo();
   const artifact = `mcp-connect-${target}.${ext}`;
-  const url = `https://github.com/${REPO}/releases/download/v${VERSION}/${artifact}`;
+  const baseUrl = `https://github.com/${REPO}/releases/download/v${VERSION}`;
 
   console.log(`Installing mcp-connect v${VERSION} (${target})...`);
 
-  const buffer = await download(url);
+  // Download archive and checksum
+  const [buffer, checksumBuffer] = await Promise.all([
+    download(`${baseUrl}/${artifact}`),
+    download(`${baseUrl}/${artifact}.sha256`).catch(() => null),
+  ]);
+
+  // Verify checksum if available
+  if (checksumBuffer) {
+    const expectedHash = checksumBuffer.toString("utf8").trim().split(/\s+/)[0];
+    if (!verifyChecksum(buffer, expectedHash)) {
+      throw new Error("Checksum verification failed");
+    }
+    console.log("Checksum verified.");
+  }
+
   fs.mkdirSync(BIN_DIR, { recursive: true });
   extract(buffer, BIN_DIR, isWindows);
 
