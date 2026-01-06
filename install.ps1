@@ -48,5 +48,9 @@ Write-Host "⚙️ Adding $target to PATH..."
 $env:Path += ";$target"
 [Environment]::SetEnvironmentVariable("Path", $env:Path, [EnvironmentVariableTarget]::Machine)
 
+Write-Host "🧹 Cleaning up temp files..."
+Remove-Item -Path $tmpFile -Force -ErrorAction SilentlyContinue
+Remove-Item -Path $tmpChecksum -Force -ErrorAction SilentlyContinue
+
 Write-Host "✅ Installed $binary successfully!"
 & $exePath --version

@@ -45,5 +45,8 @@ echo "⚙️ Installing to /usr/local/bin (sudo required)..."
 chmod +x "$BINARY"
 sudo mv "$BINARY" /usr/local/bin/
 
+echo "🧹 Cleaning up temp files..."
+rm -f "$FILE" "$CHECKSUM_FILE"
+
 echo "✅ Installed $BINARY successfully!"
 $BINARY --version
