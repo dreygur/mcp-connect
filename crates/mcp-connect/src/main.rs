@@ -306,6 +306,18 @@ enum Commands {
         #[arg(long, help = "Clear cached token instead of authenticating")]
         clear: bool,
     },
+
+    /// Update mcp-connect to the latest version
+    Update {
+        #[arg(long, help = "Force update even if already on latest version")]
+        force: bool,
+
+        #[arg(long, help = "Only check for updates without installing")]
+        check: bool,
+
+        #[arg(long, help = "Enable daily auto-update")]
+        auto: Option<bool>,
+    },
 }
 
 
@@ -357,6 +369,12 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     setup_logging(cli.debug, cli.log_level.clone())?;
+
+    // Daily auto-update check (if enabled)
+    if commands::update::check_and_auto_update().await {
+        // Update was performed, user should restart
+        return Ok(());
+    }
 
     // Quick connection mode: mcp-connect <url>
     if let Some(url) = cli.url {
@@ -496,6 +514,16 @@ async fn main() -> Result<()> {
             commands::proxy::run_auth(
                 endpoint, oauth_client_id, oauth_client_secret, oauth_redirect_port, clear,
             ).await
+        }
+
+        Commands::Update { force, check, auto } => {
+            if let Some(enabled) = auto {
+                commands::update::set_auto_update(enabled)
+            } else if check {
+                commands::update::version_check().await
+            } else {
+                commands::update::run_update(force).await
+            }
         }
     };
 

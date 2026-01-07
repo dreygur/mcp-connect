@@ -1,6 +1,6 @@
 [package]
 name = "mcp-connect"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2021"
 authors = ["Rakibul Yeasin <ryeasin03@gmail.com>"]
 
@@ -30,3 +30,8 @@ async-trait = { workspace = true }
 rmcp = { workspace = true }
 url = { workspace = true }
 open = "5.0"
+sha2 = "0.10"
+flate2 = "1.0"
+tar = "0.4"
+zip = "2.2"
+dirs = "5.0"

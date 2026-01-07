@@ -6,3 +6,4 @@ pub mod init;
 pub mod proxy;
 pub mod registry;
 pub mod serve;
+pub mod update;
