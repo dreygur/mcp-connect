@@ -455,4 +455,21 @@ mod tests {
         assert_eq!(code, "test_code");
         assert_eq!(state, "test_state");
     }
+
+    // Expected value from: openssl dgst -sha256 -binary | base64url, no padding
+    #[test]
+    fn test_code_challenge_s256() {
+        let challenge =
+            OAuthClient::generate_code_challenge("dBjftJeZ4CVP-mtG4z0nEWF0twHKt0y-RXh9F1Gp6y0");
+        assert_eq!(challenge, "4lNU6pOtjORW0zKVYszIQGYbcGwW-gTAYPd4jqDQRPk");
+    }
+
+    // 32 random bytes in unpadded base64url is 43 chars, the RFC 7636 minimum
+    #[test]
+    fn test_code_verifier_shape() {
+        let a = OAuthClient::generate_code_verifier();
+        let b = OAuthClient::generate_code_verifier();
+        assert_eq!(a.len(), 43);
+        assert_ne!(a, b);
+    }
 }

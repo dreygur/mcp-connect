@@ -25,13 +25,13 @@ tracing-subscriber = { workspace = true }
 tracing-core = { workspace = true }
 futures = { workspace = true }
 reqwest = { workspace = true }
-inquire = "0.7"
+inquire = "0.9"
 async-trait = { workspace = true }
 rmcp = { workspace = true }
 url = { workspace = true }
 open = "5.0"
-sha2 = "0.10"
+sha2 = "0.11"
 flate2 = "1.0"
 tar = "0.4"
-zip = "2.2"
-dirs = "5.0"
+zip = "9.8"
+dirs = "7.0"

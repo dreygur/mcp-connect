@@ -122,6 +122,12 @@ async fn fetch_latest_version(client: &Client) -> Result<Option<(String, Release
     }
 }
 
+/// Lowercase hex SHA256, the format release checksum files use
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Download and verify checksum
 async fn download_with_checksum(client: &Client, url: &str, checksum_url: &str) -> Result<Vec<u8>> {
     let checksum_content = client.get(checksum_url).send().await?.text().await?;
@@ -132,10 +138,7 @@ async fn download_with_checksum(client: &Client, url: &str, checksum_url: &str) 
 
     let data = client.get(url).send().await?.bytes().await?.to_vec();
 
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(&data);
-    let actual_hash = format!("{:x}", hasher.finalize());
+    let actual_hash = sha256_hex(&data);
 
     if actual_hash != expected_hash {
         anyhow::bail!("Checksum mismatch");
@@ -166,7 +169,7 @@ fn extract_binary(data: &[u8], artifact_name: &str) -> Result<Vec<u8>> {
         let mut archive = ZipArchive::new(Cursor::new(data))?;
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
-            if file.name().contains("mcp-connect") {
+            if file.name()?.contains("mcp-connect") {
                 let mut buf = Vec::new();
                 file.read_to_end(&mut buf)?;
                 return Ok(buf);
@@ -313,4 +316,17 @@ pub fn set_auto_update(enabled: bool) -> Result<()> {
     state.save()?;
     println!("Auto-update {}", if enabled { "enabled" } else { "disabled" });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sha256_hex() {
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }

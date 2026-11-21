@@ -16,13 +16,13 @@ futures = { workspace = true }
 rmcp = { workspace = true }
 async-trait = { workspace = true }
 tracing = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 oauth2 = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true }
 urlencoding = { workspace = true }
-sha2 = "0.10"
-rand = "0.8"
+sha2 = "0.11"
+rand = "0.10"
 open = "5.0"
-dirs = "5.0"
-md5 = "0.7"
+dirs = "7.0"
+md5 = "0.8"

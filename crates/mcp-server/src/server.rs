@@ -1,7 +1,7 @@
 use crate::error::{Result, ServerError};
 use mcp_types::{LogLevel, LogMessage, McpServer};
 use rmcp::model::{
-    Implementation, InitializeResult, ServerCapabilities, InitializeRequestParam, ProtocolVersion,
+    Implementation, InitializeResult, ServerCapabilities, InitializeRequestParams,
 };
 use serde_json::{json, Value};
 use std::io::{self, Write};
@@ -161,32 +161,26 @@ impl McpStdioServer {
     }
 
     fn handle_initialize_request(&mut self, params: Value, id: Value) -> Result<String> {
-        let init_params: InitializeRequestParam = serde_json::from_value(params)
+        let init_params: InitializeRequestParams =serde_json::from_value(params)
             .map_err(|e| ServerError::InvalidMessage(e.to_string()))?;
 
         self.client_info = Some(init_params.client_info);
         self.initialized = true;
 
-        let server_info = Implementation {
-            name: "mcp-stdio-server".to_string(),
-            version: "0.1.0".to_string(),
-            title: None,
-            icons: None,
-            website_url: None,
-        };
+        let server_info = Implementation::new("mcp-stdio-server", "0.1.0");
 
+        // Logs go out as notifications/message, which the negotiated
+        // 2025-06-18 spec still defines; only newer versions drop it.
+        #[allow(deprecated)]
         let capabilities = ServerCapabilities::builder()
             .enable_logging()
             .enable_tools()
             .enable_resources()
             .build();
 
-        let result = InitializeResult {
-            protocol_version: ProtocolVersion::default(),
-            capabilities,
-            server_info,
-            instructions: Some("MCP STDIO Server ready".to_string()),
-        };
+        let result = InitializeResult::new(capabilities)
+            .with_server_info(server_info)
+            .with_instructions("MCP STDIO Server ready");
 
         let response = json!({
             "jsonrpc": "2.0",

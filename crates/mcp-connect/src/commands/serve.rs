@@ -16,6 +16,29 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{info, warn};
 
+const INITIALIZED_METHOD: &str = "notifications/initialized";
+
+// Versions served to local clients, newest first. Capped at what the
+// remotes are spoken to with, since messages pass through untranslated.
+const SUPPORTED_VERSIONS: [ProtocolVersion; 3] = [
+    ProtocolVersion::V_2025_06_18,
+    ProtocolVersion::V_2025_03_26,
+    ProtocolVersion::V_2024_11_05,
+];
+
+/// Pick the protocol version to answer a client's initialize with: the
+/// requested one when supported, else our newest, as the MCP spec requires.
+fn negotiate_version(request: &serde_json::Value) -> ProtocolVersion {
+    let requested = serde_json::from_value::<ProtocolVersion>(
+        request["params"]["protocolVersion"].clone(),
+    );
+
+    match requested {
+        Ok(version) if SUPPORTED_VERSIONS.contains(&version) => version,
+        _ => SUPPORTED_VERSIONS[0].clone(),
+    }
+}
+
 /// Run the multiplexing server.
 pub async fn serve(debug: bool) -> Result<()> {
     let mut manager = ConfigManager::new()?;
@@ -58,8 +81,9 @@ pub async fn serve(debug: bool) -> Result<()> {
 struct MultiplexingStrategy {
     clients: HashMap<String, Arc<Mutex<McpRemoteClient>>>,
     routing_config: mcp_types::RoutingConfig,
-    /// Track which clients are connected and initialized
-    connection_state: Arc<Mutex<HashMap<String, bool>>>,
+    /// Initialize results of remotes with a live session; absent means
+    /// the next use reconnects and initializes.
+    sessions: Arc<Mutex<HashMap<String, InitializeResult>>>,
 }
 
 impl MultiplexingStrategy {
@@ -119,13 +143,10 @@ impl MultiplexingStrategy {
 
         info!("Initialized {} client(s)", clients.len());
 
-        // Initialize connection state tracking
-        let connection_state = Arc::new(Mutex::new(HashMap::new()));
-
         Ok(Self {
             clients,
             routing_config,
-            connection_state,
+            sessions: Arc::new(Mutex::new(HashMap::new())),
         })
     }
 
@@ -157,14 +178,11 @@ impl MultiplexingStrategy {
         Ok(Arc::new(StaticTokenProvider::new(token.access_token)))
     }
 
-    /// Ensure a client is connected, using cached connection state
+    /// Ensure a client is connected and initialized. The only place that
+    /// connects: connect() opens a new transport, which drops the session.
     async fn ensure_client_connected(&self, server_name: &str, client: &Arc<Mutex<McpRemoteClient>>) -> Result<bool> {
-        // Check cached connection state first
-        {
-            let state = self.connection_state.lock().await;
-            if state.get(server_name) == Some(&true) {
-                return Ok(true);
-            }
+        if self.sessions.lock().await.contains_key(server_name) {
+            return Ok(true);
         }
 
         // Try to connect
@@ -173,10 +191,10 @@ impl MultiplexingStrategy {
             Ok(()) => {
                 // Initialize the client
                 match client_guard.initialize().await {
-                    Ok(_) => {
+                    Ok(init_result) => {
                         drop(client_guard);
-                        let mut state = self.connection_state.lock().await;
-                        state.insert(server_name.to_string(), true);
+                        let mut sessions = self.sessions.lock().await;
+                        sessions.insert(server_name.to_string(), init_result);
                         info!("Connected and initialized client: {}", server_name);
                         Ok(true)
                     }
@@ -195,8 +213,7 @@ impl MultiplexingStrategy {
 
     /// Mark a client as disconnected (for reconnection on next use)
     async fn mark_disconnected(&self, server_name: &str) {
-        let mut state = self.connection_state.lock().await;
-        state.insert(server_name.to_string(), false);
+        self.sessions.lock().await.remove(server_name);
     }
 
     /// Perform full OAuth flow for a server that requires authentication.
@@ -256,6 +273,19 @@ impl MultiplexingStrategy {
 
         // Extract request ID for response
         let request_id = request_json.get("id").cloned();
+
+        // JSON-RPC notifications get no reply; anything written back would
+        // be read by the client as a malformed response.
+        if request_id.is_none() {
+            // Each remote already got its own from client.initialize()
+            if request_json["method"] == INITIALIZED_METHOD {
+                return Ok(None);
+            }
+            if let Err(e) = self.forward_to_any(request).await {
+                warn!("Failed to forward notification: {}", e);
+            }
+            return Ok(None);
+        }
 
         // Check if this is a tools/list, resources/list, or prompts/list request
         if let Some(method) = request_json["method"].as_str() {
@@ -407,8 +437,10 @@ impl MultiplexingStrategy {
             .get(server_name)
             .context(format!("Server '{}' not found", server_name))?;
 
+        if !self.ensure_client_connected(server_name, client).await? {
+            anyhow::bail!("Server '{}' unavailable", server_name);
+        }
         let mut client_guard = client.lock().await;
-        client_guard.connect().await?;
 
         // Modify request to use actual tool name (without prefix)
         let mut modified_request = request.clone();
@@ -433,8 +465,10 @@ impl MultiplexingStrategy {
             .get(server_name)
             .context(format!("Server '{}' not found", server_name))?;
 
+        if !self.ensure_client_connected(server_name, client).await? {
+            anyhow::bail!("Server '{}' unavailable", server_name);
+        }
         let mut client_guard = client.lock().await;
-        client_guard.connect().await?;
 
         let mut modified_request = request.clone();
         modified_request["params"]["uri"] = serde_json::json!(actual_uri);
@@ -452,30 +486,16 @@ impl MultiplexingStrategy {
             .cloned()
             .unwrap_or(serde_json::Value::Null);
 
-        // Initialize all servers and collect their capabilities
+        // Reuse sessions opened at startup; only remotes without one initialize here
         let mut init_results = Vec::new();
         let mut server_infos = Vec::new();
 
         for (server_name, client) in &self.clients {
-            let mut client_guard = client.lock().await;
-
-            // Connect and initialize each server
-            if let Err(e) = client_guard.connect().await {
-                warn!(
-                    "Failed to connect to server '{}' during initialize: {}",
-                    server_name, e
-                );
+            if !self.ensure_client_connected(server_name, client).await? {
                 continue;
             }
-
-            match client_guard.initialize().await {
-                Ok(init_result) => {
-                    info!("Initialized server '{}' with capabilities", server_name);
-                    init_results.push((server_name.clone(), init_result));
-                }
-                Err(e) => {
-                    warn!("Failed to initialize server '{}': {}", server_name, e);
-                }
+            if let Some(init_result) = self.sessions.lock().await.get(server_name) {
+                init_results.push((server_name.clone(), init_result.clone()));
             }
         }
 
@@ -496,6 +516,8 @@ impl MultiplexingStrategy {
         // Since we're aggregating multiple servers, we'll enable all common capabilities
         // that are typically supported. This ensures the client knows what's available.
         // The actual capabilities are determined by what servers we can connect to.
+        // Logging is deprecated only after the 2025-06-18 spec we negotiate.
+        #[allow(deprecated)]
         let merged_capabilities = ServerCapabilities::builder()
             .enable_logging() // Most servers support logging
             .enable_tools() // Most servers support tools
@@ -503,16 +525,10 @@ impl MultiplexingStrategy {
             .build();
 
         // Create merged server info
-        let merged_server_info = Implementation {
-            name: "mcp-connect".to_string(),
-            version: "0.1.0".to_string(),
-            title: Some(format!(
-                "MCP Connect Multiplexer ({} server(s))",
-                init_results.len()
-            )),
-            icons: None,
-            website_url: None,
-        };
+        let merged_server_info = Implementation::new("mcp-connect", "0.1.0").with_title(format!(
+            "MCP Connect Multiplexer ({} server(s))",
+            init_results.len()
+        ));
 
         // Combine instructions from all servers
         let mut instructions_parts = vec![format!(
@@ -535,19 +551,11 @@ impl MultiplexingStrategy {
             instructions_parts.first().cloned()
         };
 
-        // Use the protocol version from the first server (they should all be the same)
-        let protocol_version = init_results
-            .first()
-            .map(|(_, r)| r.protocol_version.clone())
-            .unwrap_or_else(ProtocolVersion::default);
-
         // Build the merged initialize result
-        let merged_result = InitializeResult {
-            protocol_version,
-            capabilities: merged_capabilities,
-            server_info: merged_server_info,
-            instructions: merged_instructions,
-        };
+        let mut merged_result = InitializeResult::new(merged_capabilities)
+            .with_protocol_version(negotiate_version(&request))
+            .with_server_info(merged_server_info);
+        merged_result.instructions = merged_instructions;
 
         // Build response
         let response = serde_json::json!({
@@ -563,21 +571,17 @@ impl MultiplexingStrategy {
     async fn forward_to_any(&self, request: &str) -> Result<String> {
         // Try first available server
         for (name, client) in &self.clients {
-            let mut client_guard = client.lock().await;
-
-            match client_guard.connect().await {
-                Ok(_) => {
-                    info!("Forwarding request to server: {}", name);
-                    return client_guard
-                        .send_request(request)
-                        .await
-                        .map_err(|e| anyhow::anyhow!("Request failed: {}", e));
-                }
-                Err(e) => {
-                    warn!("Failed to connect to '{}': {}", name, e);
-                    continue;
-                }
+            if !self.ensure_client_connected(name, client).await? {
+                continue;
             }
+
+            info!("Forwarding request to server: {}", name);
+            return client
+                .lock()
+                .await
+                .send_request(request)
+                .await
+                .map_err(|e| anyhow::anyhow!("Request failed: {}", e));
         }
 
         anyhow::bail!("No servers available")
@@ -611,18 +615,11 @@ impl mcp_proxy::strategy::ProxyStrategy for MultiplexingStrategy {
     }
 
     async fn initialize(&self) -> mcp_proxy::error::Result<()> {
-        // Initialize all clients
+        // Open every session up front; failures retry on first use
         for (name, client) in &self.clients {
-            let mut client_guard = client.lock().await;
-            if let Err(e) = client_guard.connect().await {
-                warn!("Failed to initialize client '{}': {}", name, e);
-            } else {
-                if let Err(e) = client_guard.initialize().await {
-                    warn!("Failed to initialize MCP protocol for '{}': {}", name, e);
-                } else {
-                    info!("Initialized client: {}", name);
-                }
-            }
+            self.ensure_client_connected(name, client)
+                .await
+                .map_err(|e| mcp_proxy::error::ProxyError::Strategy(e.to_string()))?;
         }
 
         Ok(())
@@ -639,5 +636,163 @@ impl mcp_proxy::strategy::ProxyStrategy for MultiplexingStrategy {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mock_strategy() -> MultiplexingStrategy {
+        MultiplexingStrategy {
+            clients: HashMap::new(),
+            routing_config: Default::default(),
+            sessions: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_notification_gets_no_reply() {
+        let reply = mock_strategy()
+            .route_request(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .await
+            .unwrap();
+        assert_eq!(reply, None);
+    }
+
+    type Log = Arc<Mutex<Vec<serde_json::Value>>>;
+
+    async fn mock_reply(body: &[u8], log: &Log) -> String {
+        let msg: serde_json::Value = serde_json::from_slice(body).unwrap();
+        log.lock().await.push(msg.clone());
+
+        let Some(id) = msg.get("id") else {
+            return "HTTP/1.1 202 Accepted\r\ncontent-length: 0\r\n\r\n".to_string();
+        };
+
+        let result = match msg["method"].as_str() {
+            Some("initialize") => serde_json::json!({
+                "protocolVersion": "2025-06-18",
+                "capabilities": {},
+                "serverInfo": {"name": "mock", "version": "1"}
+            }),
+            Some("tools/list") => serde_json::json!({"tools": []}),
+            _ => serde_json::json!({}),
+        };
+        let out = serde_json::json!({"jsonrpc": "2.0", "id": id, "result": result}).to_string();
+
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nmcp-session-id: s1\r\ncontent-length: {}\r\n\r\n{}",
+            out.len(),
+            out
+        )
+    }
+
+    // Streamable HTTP remote that logs every JSON-RPC message it receives.
+    async fn mock_remote() -> (String, Log) {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let log: Log = Default::default();
+        let log_task = log.clone();
+
+        tokio::spawn(async move {
+            loop {
+                let (stream, _) = listener.accept().await.unwrap();
+                let log = log_task.clone();
+
+                tokio::spawn(async move {
+                    let mut stream = BufReader::new(stream);
+                    loop {
+                        let mut line = String::new();
+                        if stream.read_line(&mut line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+
+                        let mut len = 0;
+                        loop {
+                            let mut header = String::new();
+                            stream.read_line(&mut header).await.unwrap();
+                            if header == "\r\n" {
+                                break;
+                            }
+                            let header = header.to_ascii_lowercase();
+                            if let Some(value) = header.strip_prefix("content-length:") {
+                                len = value.trim().parse().unwrap();
+                            }
+                        }
+                        let mut body = vec![0; len];
+                        stream.read_exact(&mut body).await.unwrap();
+
+                        let reply = if line.starts_with("POST") {
+                            mock_reply(&body, &log).await
+                        } else {
+                            "HTTP/1.1 405 Method Not Allowed\r\ncontent-length: 0\r\n\r\n".to_string()
+                        };
+                        stream.get_mut().write_all(reply.as_bytes()).await.unwrap();
+                    }
+                });
+            }
+        });
+
+        (url, log)
+    }
+
+    #[tokio::test]
+    async fn test_remote_initialized_once() {
+        use mcp_proxy::strategy::ProxyStrategy;
+
+        let (url, log) = mock_remote().await;
+        let config = mcp_client::transport::TransportConfig {
+            endpoint: url,
+            ..Default::default()
+        };
+        let client = McpRemoteClient::new_with_config(config, vec![]);
+        let mut strategy = mock_strategy();
+        strategy.clients.insert("mock".to_string(), Arc::new(Mutex::new(client)));
+
+        strategy.initialize().await.unwrap();
+        for request in [
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#,
+            r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/list"}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"mock/echo","arguments":{}}}"#,
+        ] {
+            strategy.route_request(request).await.unwrap();
+        }
+
+        let methods: Vec<String> = log
+            .lock()
+            .await
+            .iter()
+            .map(|m| m["method"].as_str().unwrap_or_default().to_string())
+            .collect();
+        assert_eq!(
+            methods,
+            ["initialize", "notifications/initialized", "tools/list", "tools/call"]
+        );
+    }
+
+    fn init_request(version: &str) -> serde_json::Value {
+        serde_json::json!({"params": {"protocolVersion": version}})
+    }
+
+    #[test]
+    fn test_negotiate_supported_version() {
+        let version = negotiate_version(&init_request("2025-03-26"));
+        assert_eq!(version, ProtocolVersion::V_2025_03_26);
+    }
+
+    #[test]
+    fn test_negotiate_unsupported_version() {
+        let version = negotiate_version(&init_request("2099-01-01"));
+        assert_eq!(version, ProtocolVersion::V_2025_06_18);
+    }
+
+    #[test]
+    fn test_negotiate_missing_version() {
+        let version = negotiate_version(&serde_json::json!({}));
+        assert_eq!(version, ProtocolVersion::V_2025_06_18);
     }
 }

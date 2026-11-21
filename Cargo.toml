@@ -14,17 +14,17 @@ resolver = "2"
 tokio = { version = "1.0", features = ["rt-multi-thread", "io-std", "io-util", "net", "sync", "time", "macros", "process", "signal"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-thiserror = "1.0"
+thiserror = "2.0"
 anyhow = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 tracing-core = "0.1"
-rmcp = { version = "0.7", features = ["auth"] }
-reqwest = { version = "0.11", features = ["json", "stream"] }
+rmcp = { version = "3.11", features = ["auth"] }
+reqwest = { version = "0.13", features = ["json", "stream", "form"] }
 futures = "0.3"
 async-trait = "0.1"
-base64 = "0.21"
+base64 = "0.23"
 oauth2 = { version = "5.0", features = ["reqwest"] }
 url = "2.4"
 uuid = { version = "1.0", features = ["v4"] }

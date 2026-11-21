@@ -2,12 +2,17 @@ use crate::error::{ClientError, Result};
 use crate::transport::{create_transport, McpClientTransport, TransportConfig};
 use mcp_types::{McpClient, TransportType};
 use rmcp::model::{
-    ClientCapabilities, Implementation, InitializeRequestParam, InitializeResult, ProtocolVersion,
+    ClientCapabilities, Implementation, InitializeRequestParams, InitializeResult, ProtocolVersion,
 };
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
+
+// serve passes the remote's negotiated version straight to the local client,
+// so this must be one that today's MCP clients accept. rmcp's default tracks
+// the newest spec, which older clients disconnect on.
+const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_06_18;
 
 pub struct McpRemoteClient {
     transports: Vec<(TransportType, TransportConfig)>,
@@ -46,18 +51,10 @@ impl McpRemoteClient {
             transports.push((transport_type, config));
         }
 
-        let client_info = Implementation {
-            name: "mcp-connect-client".to_string(),
-            version: "0.1.0".to_string(),
-            title: None,
-            icons: None,
-            website_url: None,
-        };
+        let client_info = Implementation::new("mcp-connect-client", "0.1.0");
 
         let capabilities = ClientCapabilities::builder()
             .enable_experimental()
-            .enable_roots()
-            .enable_roots_list_changed()
             .build();
 
         Self {
@@ -72,18 +69,10 @@ impl McpRemoteClient {
     }
 
     pub async fn with_custom_transports(transports: Vec<(TransportType, TransportConfig)>) -> Self {
-        let client_info = Implementation {
-            name: "mcp-connect-client".to_string(),
-            version: "0.1.0".to_string(),
-            title: None,
-            icons: None,
-            website_url: None,
-        };
+        let client_info = Implementation::new("mcp-connect-client", "0.1.0");
 
         let capabilities = ClientCapabilities::builder()
             .enable_experimental()
-            .enable_roots()
-            .enable_roots_list_changed()
             .build();
 
         Self {
@@ -119,18 +108,10 @@ impl McpRemoteClient {
             transports.push((transport_type, config));
         }
 
-        let client_info = Implementation {
-            name: "mcp-connect-client".to_string(),
-            version: "0.1.0".to_string(),
-            title: None,
-            icons: None,
-            website_url: None,
-        };
+        let client_info = Implementation::new("mcp-connect-client", "0.1.0");
 
         let capabilities = ClientCapabilities::builder()
             .enable_experimental()
-            .enable_roots()
-            .enable_roots_list_changed()
             .build();
 
         Self {
@@ -249,14 +230,24 @@ impl McpRemoteClient {
         Err(ClientError::Connection("All retry attempts failed".to_string()))
     }
 
+    fn init_params(&self) -> InitializeRequestParams {
+        InitializeRequestParams::new(self.capabilities.clone(), self.client_info.clone())
+            .with_protocol_version(PROTOCOL_VERSION)
+    }
+
+    // The spec requires this after a successful initialize; servers may
+    // refuse other requests until it arrives.
+    async fn notify_initialized(&self) {
+        let notification = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        if let Err(e) = self.send_request_with_retry(&notification.to_string()).await {
+            warn!("Failed to send initialized notification: {}", e);
+        }
+    }
+
     pub async fn initialize(&self) -> Result<InitializeResult> {
         let request_id = self.next_request_id().await;
 
-        let request_params = InitializeRequestParam {
-            protocol_version: ProtocolVersion::default(),
-            capabilities: self.capabilities.clone(),
-            client_info: self.client_info.clone(),
-        };
+        let request_params = self.init_params();
 
         let json_request = json!({
             "jsonrpc": "2.0",
@@ -274,18 +265,9 @@ impl McpRemoteClient {
             // HTTP transport might return empty response for 202 Accepted
             warn!("Received empty response, assuming initialization succeeded");
             *self.initialized.lock().await = true;
-            return Ok(InitializeResult {
-                protocol_version: ProtocolVersion::default(),
-                capabilities: Default::default(),
-                server_info: Implementation {
-                    name: "unknown".to_string(),
-                    version: "unknown".to_string(),
-                    title: None,
-                    icons: None,
-                    website_url: None,
-                },
-                instructions: None,
-            });
+            self.notify_initialized().await;
+            return Ok(InitializeResult::new(Default::default())
+                .with_server_info(Implementation::new("unknown", "unknown")));
         }
 
         let parsed: Value = serde_json::from_str(&response)
@@ -300,6 +282,7 @@ impl McpRemoteClient {
         )?;
 
         *self.initialized.lock().await = true;
+        self.notify_initialized().await;
         info!("Successfully initialized MCP client");
 
         Ok(result)
@@ -440,5 +423,24 @@ impl McpClient for McpRemoteClient {
         }
         *self.initialized.lock().await = false;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_params_protocol_version() {
+        let client = McpRemoteClient::new("http://127.0.0.1/mcp".to_string(), vec![]);
+        assert_eq!(client.init_params().protocol_version, ProtocolVersion::V_2025_06_18);
+    }
+
+    // No roots/list handler exists, so advertising roots would leave a
+    // server's request unanswered.
+    #[test]
+    fn test_init_params_no_roots() {
+        let client = McpRemoteClient::new("http://127.0.0.1/mcp".to_string(), vec![]);
+        assert!(client.init_params().capabilities.roots.is_none());
     }
 }

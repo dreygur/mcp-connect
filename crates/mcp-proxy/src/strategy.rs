@@ -7,6 +7,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
+const INITIALIZED_METHOD: &str = "notifications/initialized";
+
 #[async_trait]
 pub trait ProxyStrategy: Send + Sync {
     async fn handle_request(&self, request: &str) -> Result<Option<String>>;
@@ -196,6 +198,11 @@ impl ProxyStrategy for LoadBalancingStrategy {
         debug!("Load balancing request: {}", request);
 
         if ForwardingStrategy::is_notification(request) {
+            // Each client sends its own after initialize()
+            if ForwardingStrategy::extract_method(request).as_deref() == Some(INITIALIZED_METHOD) {
+                return Ok(None);
+            }
+
             debug!("Received notification, forwarding to all clients");
             // Forward notification to all initialized clients
             let initialized = self.initialized.lock().await;
