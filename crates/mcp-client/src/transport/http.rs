@@ -3,10 +3,48 @@ use crate::error::{ClientError, Result};
 use crate::transport::{McpClientTransport, TransportConfig};
 use async_trait::async_trait;
 use reqwest::{Client, header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE}};
+use serde_json::Value;
 use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
+
+const SESSION_HEADER: &str = "Mcp-Session-Id";
+const PROTOCOL_VERSION_HEADER: &str = "MCP-Protocol-Version";
+const EVENT_STREAM: &str = "text/event-stream";
+
+/// The JSON-RPC response to `request_id` out of an SSE body. Servers may
+/// stream notifications ahead of it; those are skipped, since this
+/// transport hands back one reply per request.
+fn pick_sse_response(sse_text: &str, request_id: &Value) -> String {
+    let mut fallback = String::new();
+
+    for event in sse_text.split("\n\n") {
+        let data: Vec<&str> = event
+            .lines()
+            .filter_map(|line| line.strip_prefix("data:"))
+            .map(str::trim_start)
+            .collect();
+        if data.is_empty() {
+            continue;
+        }
+
+        let data = data.join("\n");
+        let is_reply = serde_json::from_str::<Value>(&data)
+            .map(|msg| msg.get("id") == Some(request_id) && msg.get("method").is_none())
+            .unwrap_or(false);
+        if is_reply {
+            return data;
+        }
+        fallback = data;
+    }
+
+    if fallback.is_empty() {
+        "{}".to_string()
+    } else {
+        fallback
+    }
+}
 
 /// Mask sensitive token for logging (show first 8 chars + "...")
 fn mask_token(token: &str) -> String {
@@ -22,6 +60,9 @@ pub struct HttpTransport {
     config: TransportConfig,
     connected: Arc<Mutex<bool>>,
     session_id: Arc<Mutex<Option<String>>>,
+    /// Version the server picked at initialize; the spec requires it as a
+    /// header on every request after that.
+    protocol_version: Arc<Mutex<Option<String>>>,
     token_provider: Option<Arc<dyn TokenProvider>>,
 }
 
@@ -39,6 +80,7 @@ impl HttpTransport {
             config,
             connected: Arc::new(Mutex::new(false)),
             session_id: Arc::new(Mutex::new(None)),
+            protocol_version: Arc::new(Mutex::new(None)),
             token_provider,
         })
     }
@@ -99,8 +141,13 @@ impl HttpTransport {
 
         // Add session ID if available
         if let Some(session_id) = self.session_id.lock().await.as_ref() {
-            headers.insert("Mcp-Session-Id", HeaderValue::from_str(session_id)
+            headers.insert(SESSION_HEADER, HeaderValue::from_str(session_id)
                 .map_err(|e| ClientError::Protocol(format!("Invalid session ID: {}", e)))?);
+        }
+
+        if let Some(version) = self.protocol_version.lock().await.as_ref() {
+            headers.insert(PROTOCOL_VERSION_HEADER, HeaderValue::from_str(version)
+                .map_err(|e| ClientError::Protocol(format!("Invalid protocol version: {}", e)))?);
         }
 
         debug!("Sending HTTP request to {}: {}", self.config.endpoint, payload);
@@ -113,7 +160,7 @@ impl HttpTransport {
             .await?;
 
         // Extract session ID from response headers if present
-        if let Some(session_id) = response.headers().get("Mcp-Session-Id") {
+        if let Some(session_id) = response.headers().get(SESSION_HEADER) {
             if let Ok(session_str) = session_id.to_str() {
                 *self.session_id.lock().await = Some(session_str.to_string());
                 debug!("Updated session ID: {}", session_str);
@@ -135,6 +182,11 @@ impl HttpTransport {
         }
 
         let status = response.status();
+        let is_stream = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.starts_with(EVENT_STREAM));
         let response_text = response.text().await?;
         debug!("Received HTTP response (status {}): {}", status, response_text);
 
@@ -144,35 +196,41 @@ impl HttpTransport {
             return Ok("{}".to_string());
         }
 
-        // Check if this is a Server-Sent Events (SSE) response
-        if response_text.starts_with("event:") || response_text.contains("data:") {
-            debug!("Detected SSE response, parsing data field");
-            return self.parse_sse_response(&response_text);
+        let request: Value = serde_json::from_str(payload).unwrap_or(Value::Null);
+        let reply = if is_stream {
+            pick_sse_response(&response_text, &request["id"])
+        } else {
+            response_text
+        };
+
+        if request["method"] == "initialize" {
+            self.remember_version(&reply).await;
         }
 
-        Ok(response_text)
+        Ok(reply)
     }
 
-    fn parse_sse_response(&self, sse_text: &str) -> Result<String> {
-        // Parse SSE format to extract JSON data
-        // Format: event: message\ndata: {...}\n\n
-        let mut json_data = String::new();
+    async fn remember_version(&self, init_reply: &str) {
+        let version = serde_json::from_str::<Value>(init_reply)
+            .ok()
+            .and_then(|v| v["result"]["protocolVersion"].as_str().map(str::to_string));
+        *self.protocol_version.lock().await = version;
+    }
 
-        for line in sse_text.lines() {
-            let line = line.trim();
-            if line.starts_with("data:") {
-                let data_part = &line[5..].trim(); // Remove "data:" prefix
-                json_data.push_str(data_part);
-            }
+    // The spec asks clients to end sessions they no longer need
+    async fn end_session(&self) {
+        let Some(session_id) = self.session_id.lock().await.take() else {
+            return;
+        };
+
+        let result = self.client
+            .delete(&self.config.endpoint)
+            .header(SESSION_HEADER, session_id)
+            .send()
+            .await;
+        if let Err(e) = result {
+            debug!("Session DELETE failed: {}", e);
         }
-
-        if json_data.is_empty() {
-            debug!("No data field found in SSE response, returning empty JSON");
-            return Ok("{}".to_string());
-        }
-
-        debug!("Extracted JSON from SSE: {}", json_data);
-        Ok(json_data)
     }
 
     async fn test_connection(&self) -> Result<()> {
@@ -233,8 +291,9 @@ impl McpClientTransport for HttpTransport {
     }
 
     async fn disconnect(&mut self) -> Result<()> {
+        self.end_session().await;
         *self.connected.lock().await = false;
-        *self.session_id.lock().await = None;
+        *self.protocol_version.lock().await = None;
         info!("Disconnected from MCP server");
         Ok(())
     }

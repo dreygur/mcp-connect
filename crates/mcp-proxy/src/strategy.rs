@@ -1,7 +1,9 @@
 use crate::error::{ProxyError, Result};
+use crate::version::negotiate_version;
 use async_trait::async_trait;
 use mcp_client::McpRemoteClient;
 use mcp_types::McpClient;
+use rmcp::model::InitializeResult;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -155,7 +157,8 @@ impl ProxyStrategy for ForwardingStrategy {
 pub struct LoadBalancingStrategy {
     clients: Vec<Arc<Mutex<McpRemoteClient>>>,
     current_client: Arc<Mutex<usize>>,
-    initialized: Arc<Mutex<Vec<bool>>>,
+    /// Each client's initialize result while its session is live
+    initialized: Arc<Mutex<Vec<Option<InitializeResult>>>>,
 }
 
 impl LoadBalancingStrategy {
@@ -164,8 +167,31 @@ impl LoadBalancingStrategy {
         Self {
             clients: clients.into_iter().map(|c| Arc::new(Mutex::new(c))).collect(),
             current_client: Arc::new(Mutex::new(0)),
-            initialized: Arc::new(Mutex::new(vec![false; client_count])),
+            initialized: Arc::new(Mutex::new(vec![None; client_count])),
         }
+    }
+
+    /// Answer the local client's initialize from a remote's cached result.
+    /// Remotes run their own handshake, so forwarding it would initialize
+    /// them twice.
+    async fn handle_initialize(&self, request: &str) -> Result<Option<String>> {
+        let request: Value = serde_json::from_str(request)?;
+
+        for index in 0..self.clients.len() {
+            if let Err(e) = self.ensure_client_initialized(index).await {
+                warn!("Failed to initialize client {}: {}", index, e);
+                continue;
+            }
+            let Some(mut result) = self.initialized.lock().await[index].clone() else {
+                continue;
+            };
+
+            result.protocol_version = negotiate_version(&request);
+            let reply = serde_json::json!({"jsonrpc": "2.0", "id": request["id"], "result": result});
+            return Ok(Some(reply.to_string()));
+        }
+
+        Err(ProxyError::ForwardingFailed("No client could initialize".to_string()))
     }
 
     async fn get_next_client(&self) -> Result<Arc<Mutex<McpRemoteClient>>> {
@@ -180,12 +206,11 @@ impl LoadBalancingStrategy {
 
     async fn ensure_client_initialized(&self, client_index: usize) -> Result<()> {
         let mut initialized = self.initialized.lock().await;
-        if !initialized[client_index] {
+        if initialized[client_index].is_none() {
             let client = &self.clients[client_index];
             let mut client_guard = client.lock().await;
             client_guard.connect().await?;
-            let _init_result = client_guard.initialize().await?;
-            initialized[client_index] = true;
+            initialized[client_index] = Some(client_guard.initialize().await?);
             info!("Load balancing client {} initialized", client_index);
         }
         Ok(())
@@ -207,7 +232,7 @@ impl ProxyStrategy for LoadBalancingStrategy {
             // Forward notification to all initialized clients
             let initialized = self.initialized.lock().await;
             for (i, client) in self.clients.iter().enumerate() {
-                if initialized[i] {
+                if initialized[i].is_some() {
                     let mut client_guard = client.lock().await;
                     if let Err(e) = client_guard.send_request(request).await {
                         warn!("Failed to forward notification to client {}: {}", i, e);
@@ -215,6 +240,10 @@ impl ProxyStrategy for LoadBalancingStrategy {
                 }
             }
             return Ok(None);
+        }
+
+        if ForwardingStrategy::extract_method(request).as_deref() == Some("initialize") {
+            return self.handle_initialize(request).await;
         }
 
         // Try each client until one succeeds
@@ -236,7 +265,7 @@ impl ProxyStrategy for LoadBalancingStrategy {
                         Err(e) => {
                             warn!("Client {} failed: {}", client_index, e);
                             // Mark client as not initialized to force reconnection
-                            self.initialized.lock().await[client_index] = false;
+                            self.initialized.lock().await[client_index] = None;
                             continue;
                         }
                     }
@@ -282,7 +311,7 @@ impl ProxyStrategy for LoadBalancingStrategy {
             }
         }
 
-        *self.initialized.lock().await = vec![false; self.clients.len()];
+        *self.initialized.lock().await = vec![None; self.clients.len()];
         info!("Load balancing strategy shut down");
         Ok(())
     }

@@ -1420,6 +1420,7 @@ dependencies = [
  "mcp-types",
  "oauth2",
  "reqwest 0.13.5",
+ "rmcp",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

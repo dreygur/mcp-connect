@@ -14,6 +14,21 @@ use tracing::{error, info, warn};
 // the newest spec, which older clients disconnect on.
 const PROTOCOL_VERSION: ProtocolVersion = ProtocolVersion::V_2025_06_18;
 
+const INITIALIZED_NOTIFICATION: &str = r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#;
+
+fn is_initialize(request: &str) -> bool {
+    serde_json::from_str::<Value>(request)
+        .map(|v| v["method"] == "initialize")
+        .unwrap_or(false)
+}
+
+/// Open a fresh session on a rebuilt transport before reuse.
+async fn replay_handshake(transport: &mut dyn McpClientTransport, init_request: &str) -> Result<()> {
+    transport.send_request(init_request).await?;
+    transport.send_request(INITIALIZED_NOTIFICATION).await?;
+    Ok(())
+}
+
 pub struct McpRemoteClient {
     transports: Vec<(TransportType, TransportConfig)>,
     current_transport: Arc<Mutex<Option<Box<dyn McpClientTransport>>>>,
@@ -22,6 +37,9 @@ pub struct McpRemoteClient {
     client_info: Implementation,
     capabilities: ClientCapabilities,
     request_id: Arc<Mutex<u64>>,
+    /// Last successful initialize request, replayed when the transport is
+    /// rebuilt so the new session is initialized before it is used.
+    init_request: Arc<Mutex<Option<String>>>,
 }
 
 impl McpRemoteClient {
@@ -65,6 +83,7 @@ impl McpRemoteClient {
             client_info,
             capabilities,
             request_id: Arc::new(Mutex::new(1)),
+            init_request: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -83,6 +102,7 @@ impl McpRemoteClient {
             client_info,
             capabilities,
             request_id: Arc::new(Mutex::new(1)),
+            init_request: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -122,6 +142,7 @@ impl McpRemoteClient {
             client_info,
             capabilities,
             request_id: Arc::new(Mutex::new(1)),
+            init_request: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -165,17 +186,19 @@ impl McpRemoteClient {
         Err(ClientError::Connection("All transports failed".to_string()))
     }
 
-    async fn ensure_connected(&self) -> Result<()> {
+    /// Returns true when a new transport had to be built.
+    async fn ensure_connected(&self) -> Result<bool> {
         let transport_guard = self.current_transport.lock().await;
         if let Some(transport) = transport_guard.as_ref() {
             if transport.is_connected().await {
-                return Ok(());
+                return Ok(false);
             }
         }
         drop(transport_guard);
 
         // Try to reconnect
-        self.connect_with_fallbacks().await
+        self.connect_with_fallbacks().await?;
+        Ok(true)
     }
 
     async fn send_request_with_retry(&self, request: &str) -> Result<String> {
@@ -184,16 +207,36 @@ impl McpRemoteClient {
 
         let mut attempted_transports = std::collections::HashSet::new();
 
+        let sending_init = is_initialize(request);
+
         for attempt in 1..=MAX_RETRY_ATTEMPTS {
-            self.ensure_connected().await?;
+            let rebuilt = self.ensure_connected().await?;
+            let replay = if rebuilt && !sending_init {
+                self.init_request.lock().await.clone()
+            } else {
+                None
+            };
 
             let current_index = *self.current_transport_index.lock().await;
             attempted_transports.insert(current_index);
 
             let mut transport_guard = self.current_transport.lock().await;
             if let Some(transport) = transport_guard.as_mut() {
-                match transport.send_request(request).await {
-                    Ok(response) => return Ok(response),
+                let result = match replay {
+                    Some(init) => match replay_handshake(transport.as_mut(), &init).await {
+                        Ok(()) => transport.send_request(request).await,
+                        Err(e) => Err(e),
+                    },
+                    None => transport.send_request(request).await,
+                };
+
+                match result {
+                    Ok(response) => {
+                        if sending_init {
+                            *self.init_request.lock().await = Some(request.to_string());
+                        }
+                        return Ok(response);
+                    }
                     Err(e) => {
                         error!("Request attempt {} failed: {}", attempt, e);
 
@@ -238,8 +281,7 @@ impl McpRemoteClient {
     // The spec requires this after a successful initialize; servers may
     // refuse other requests until it arrives.
     async fn notify_initialized(&self) {
-        let notification = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
-        if let Err(e) = self.send_request_with_retry(&notification.to_string()).await {
+        if let Err(e) = self.send_request_with_retry(INITIALIZED_NOTIFICATION).await {
             warn!("Failed to send initialized notification: {}", e);
         }
     }
@@ -407,6 +449,13 @@ impl McpRemoteClient {
 #[async_trait::async_trait]
 impl McpClient for McpRemoteClient {
     async fn connect(&mut self) -> mcp_types::Result<()> {
+        // A new connection starts a new session: end the old one and
+        // forget its handshake, which the caller will redo.
+        if let Some(mut old) = self.current_transport.lock().await.take() {
+            let _ = old.disconnect().await;
+        }
+        *self.init_request.lock().await = None;
+
         self.connect_with_fallbacks().await
             .map_err(|e| mcp_types::McpError::Connection(e.to_string()))
     }
@@ -422,6 +471,7 @@ impl McpClient for McpRemoteClient {
                 .map_err(|e| mcp_types::McpError::Transport(e.to_string()))?;
         }
         *self.initialized.lock().await = false;
+        *self.init_request.lock().await = None;
         Ok(())
     }
 }

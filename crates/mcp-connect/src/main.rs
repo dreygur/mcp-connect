@@ -1,6 +1,10 @@
 //! MCP Connect CLI - Bridge local MCP clients to remote MCP servers.
 
 mod commands;
+#[cfg(test)]
+mod mock_remote;
+#[cfg(test)]
+mod session_tests;
 mod transport;
 
 use anyhow::Result;

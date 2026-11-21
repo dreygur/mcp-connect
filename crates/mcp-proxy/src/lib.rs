@@ -3,6 +3,7 @@ pub mod stdio_proxy;
 pub mod strategy;
 pub mod error;
 pub mod auth_proxy;
+pub mod version;
 
 pub use proxy::McpProxy;
 pub use stdio_proxy::StdioMcpProxy;

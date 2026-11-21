@@ -24,6 +24,16 @@ fn send_notification(level: LogLevel, message: &str) {
     }
 }
 
+// Opt in only: the Stdio and TCP fallbacks use placeholder endpoints
+// (a `mcp-server` command, port 8080), so a default would spawn or dial
+// whatever happens to answer there.
+fn fallback_transports(fallbacks: Option<Vec<String>>) -> Result<Vec<TransportType>> {
+    Ok(fallbacks
+        .map(|f| transport::parse_fallback_transports(&f))
+        .transpose()?
+        .unwrap_or_default())
+}
+
 /// Get OAuth token for endpoint - handles cache, refresh, and new auth
 async fn get_oauth_token(
     endpoint: &str,
@@ -111,10 +121,7 @@ pub async fn run_proxy(
     info!("Starting MCP Connect - endpoint: {}", endpoint);
     send_notification(LogLevel::Info, &format!("MCP Proxy starting: {}", endpoint));
 
-    let fallback_transports = fallbacks
-        .map(|f| transport::parse_fallback_transports(&f))
-        .transpose()?
-        .unwrap_or_else(|| vec![TransportType::Stdio, TransportType::Tcp]);
+    let fallback_transports = fallback_transports(fallbacks)?;
 
     let final_auth_token = if auth_token.is_some() {
         auth_token
@@ -275,4 +282,47 @@ pub async fn run_notification_demo(count: u32) -> Result<()> {
     }
     info!("Notification demo completed");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock_remote::{mock_config, mock_remote};
+    use mcp_proxy::ProxyStrategy;
+
+    // Stdio and TCP fallbacks carry made up endpoints, so they must be opt in
+    #[test]
+    fn test_no_default_fallbacks() {
+        assert!(fallback_transports(None).unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_load_balance_initializes_once() {
+        let (url, state) = mock_remote().await;
+        let client = McpRemoteClient::new_with_config(mock_config(url), vec![]);
+        let strategy = LoadBalancingStrategy::new(vec![client]);
+
+        strategy.initialize().await.unwrap();
+        let init = strategy
+            .handle_request(r#"{"jsonrpc":"2.0","id":7,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#)
+            .await
+            .unwrap()
+            .unwrap();
+        strategy
+            .handle_request(r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#)
+            .await
+            .unwrap();
+        strategy
+            .handle_request(r#"{"jsonrpc":"2.0","id":8,"method":"tools/list"}"#)
+            .await
+            .unwrap();
+
+        let init: serde_json::Value = serde_json::from_str(&init).unwrap();
+        assert_eq!(init["id"], 7);
+        assert_eq!(init["result"]["protocolVersion"], "2025-03-26");
+        assert_eq!(
+            state.lock().await.methods(),
+            ["initialize", "notifications/initialized", "tools/list"]
+        );
+    }
 }

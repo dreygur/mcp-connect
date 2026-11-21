@@ -6,6 +6,26 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tracing::{error, info, warn};
 
+// JSON-RPC 2.0 error codes
+const PARSE_ERROR: i32 = -32700;
+const INTERNAL_ERROR: i32 = -32603;
+
+/// JSON-RPC error reply for a message that failed, if one is owed.
+/// Unparseable input still gets one, with a null id, per the spec.
+fn error_reply(raw: &str, err: &ProxyError) -> Option<String> {
+    let (id, code, message) = match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(parsed) => (parsed.get("id")?.clone(), INTERNAL_ERROR, format!("Proxy error: {}", err)),
+        Err(e) => (serde_json::Value::Null, PARSE_ERROR, format!("Parse error: {}", e)),
+    };
+
+    let reply = serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "error": {"code": code, "message": message}
+    });
+    Some(reply.to_string())
+}
+
 pub struct StdioMcpProxy {
     proxy: McpProxy,
     debug_mode: bool,
@@ -77,6 +97,17 @@ impl StdioMcpProxy {
 
                     self.log_debug(&format!("Received: {}", trimmed));
 
+                    // Never forward malformed input to a remote
+                    if serde_json::from_str::<serde_json::Value>(trimmed).is_err() {
+                        let err = ProxyError::Protocol("invalid JSON".to_string());
+                        if let Some(error_str) = error_reply(trimmed, &err) {
+                            let _ = stdout.write_all(error_str.as_bytes()).await;
+                            let _ = stdout.write_all(b"\n").await;
+                            let _ = stdout.flush().await;
+                        }
+                        continue;
+                    }
+
                     match self.proxy.handle_message(trimmed).await {
                         Ok(Some(response)) => {
                             self.log_debug(&format!("Sending: {}", response));
@@ -100,23 +131,10 @@ impl StdioMcpProxy {
                         Err(e) => {
                             error!("Error handling message: {}", e);
 
-                            // Try to send an error response if we can parse the request ID
-                            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-                                if let Some(id) = parsed.get("id") {
-                                    let error_response = serde_json::json!({
-                                        "jsonrpc": "2.0",
-                                        "id": id,
-                                        "error": {
-                                            "code": -32603,
-                                            "message": format!("Proxy error: {}", e)
-                                        }
-                                    });
-
-                                    let error_str = error_response.to_string();
-                                    let _ = stdout.write_all(error_str.as_bytes()).await;
-                                    let _ = stdout.write_all(b"\n").await;
-                                    let _ = stdout.flush().await;
-                                }
+                            if let Some(error_str) = error_reply(trimmed, &e) {
+                                let _ = stdout.write_all(error_str.as_bytes()).await;
+                                let _ = stdout.write_all(b"\n").await;
+                                let _ = stdout.flush().await;
                             }
                         }
                     }
@@ -220,5 +238,34 @@ impl StdioProxyBuilder {
 impl Default for StdioProxyBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn reply_for(raw: &str) -> Option<serde_json::Value> {
+        let err = ProxyError::Strategy("boom".to_string());
+        error_reply(raw, &err).map(|r| serde_json::from_str(&r).unwrap())
+    }
+
+    #[test]
+    fn test_invalid_json_gets_parse_error() {
+        let reply = reply_for("{not json").unwrap();
+        assert_eq!(reply["id"], serde_json::Value::Null);
+        assert_eq!(reply["error"]["code"], -32700);
+    }
+
+    #[test]
+    fn test_failed_request_gets_internal_error() {
+        let reply = reply_for(r#"{"jsonrpc":"2.0","id":5,"method":"x"}"#).unwrap();
+        assert_eq!(reply["id"], 5);
+        assert_eq!(reply["error"]["code"], -32603);
+    }
+
+    #[test]
+    fn test_failed_notification_gets_no_reply() {
+        assert!(reply_for(r#"{"jsonrpc":"2.0","method":"x"}"#).is_none());
     }
 }
